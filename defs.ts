@@ -21,4 +21,22 @@ export interface WalkContext {
     depth: number;
 }
 
-export type WalkCallback = (node: ParseNode, context: WalkContext) => void;
+export type WalkCallback = (node: ParseNode, context: WalkContext) => void | boolean;
+export type AnnotationCallback = (node: ParseNode, context: WalkContext) => string | undefined;
+
+export interface AnnotationRange {
+    id: number;
+    start: number;
+    end: number;
+    priority: number;
+    type: string;
+    node: ParseNode;
+}
+
+export interface DefinitionInfo {
+    id: number;
+    name: string;
+    start: number;
+    end: number;
+    type?: string;
+}

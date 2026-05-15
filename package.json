@@ -1,6 +1,9 @@
 {
   "name": "incandescent",
   "private": true,
+  "scripts": {
+    "serve:web": "bun web/server.ts"
+  },
   "devDependencies": {
     "@types/bun": "^1.3.14"
   },

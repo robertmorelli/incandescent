@@ -1,42 +1,4 @@
-<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8" />
-  <title>Incandescent demo</title>
-  <style>
-    body { margin: 0; }
-    #grid { display: grid; grid-template-columns: minmax(0, 1fr) 32rem 32rem; height: 100vh; }
-    #left, #right, #mouse-right { min-width: 0; min-height: 0; overflow: hidden; }
-    #right, #mouse-right { border-left: 1px solid #ccc; }
-    .editor { position: relative; width: 100%; height: 100%; font: 14px/1.3 monospace; }
-    #expr-bg, #found-bg, #mouse-bg, #hilite, #source { box-sizing: border-box; position: absolute; inset: 0; margin: 0; padding: 8px; width: 100%; height: 100%; font: inherit; white-space: pre; overflow: auto; }
-    #expr-bg, #found-bg, #mouse-bg, #hilite { pointer-events: none; }
-    #expr-bg, #found-bg, #mouse-bg { color: transparent; }
-    #expr-bg { z-index: 0; }
-    #found-bg { z-index: 1; }
-    #mouse-bg { z-index: 2; }
-    #hilite { z-index: 3; mix-blend-mode: multiply; color: black; }
-    #source { z-index: 4; }
-    #source { color: transparent; caret-color: black; background: transparent; resize: none; }
-    #measure { position: fixed; left: -9999px; top: 0; visibility: hidden; white-space: pre; font: 14px/1.3 monospace; }
-    #info, #mouse-info { box-sizing: border-box; margin: 0; padding: 8px; width: 100%; height: 100%; overflow: auto; font: 14px/1.3 monospace; white-space: pre-wrap; }
-    .expr-hit { background: rgba(255, 230, 0, .35); }
-    .found-hit { background: rgba(0, 180, 255, .25); }
-    .mouse-hit { background: rgba(255, 120, 0, .25); }
-    #hilite .Name { color: #0645ad; } #hilite .Number { color: #098658; } #hilite .String,#hilite .StringList { color: #a31515; }
-    #hilite .Call { color: #795e26; } #hilite .MemberAccess { color: #267f99; }
-    #hilite .Operator { color: #af00db; }
-  </style>
-</head>
-<body>
-  <div id="grid">
-    <div id="left">
-      <div class="editor">
-        <pre id="expr-bg"></pre>
-        <pre id="found-bg"></pre>
-        <pre id="mouse-bg"></pre>
-        <pre id="hilite"></pre>
-        <textarea id="source" spellcheck="false"># Copyright (c) Facebook, Inc. and its affiliates. (http://www.facebook.com)
+# Copyright (c) Facebook, Inc. and its affiliates. (http://www.facebook.com)
 """
 main.py
 ============
@@ -50,9 +12,9 @@ from the Smalltalk implementation by John Maloney and Mario
 Wolczko. The original Javascript implementation was licensed under the GPL.
 
 It's been updated in places to be more idiomatic to Python (for loops over
-collections, a couple magic methods, ``OrderedCollection`` being a list &amp; things
+collections, a couple magic methods, ``OrderedCollection`` being a list & things
 altering those collections changed to the builtin methods) but largely retains
-the layout &amp; logic from the original. (Ugh.)
+the layout & logic from the original. (Ugh.)
 
 .. _`V8's source code`: (https://github.com/v8/v8/blob/master/benchmarks/deltablue.js)
 """
@@ -68,27 +30,27 @@ import time
 
 
 @inline
-def stronger(s1: Strength, s2: Strength) -&gt; cbool:
-    return s1.strength &lt; s2.strength
+def stronger(s1: Strength, s2: Strength) -> cbool:
+    return s1.strength < s2.strength
 
 
 @inline
-def weaker(s1: Strength, s2: Strength) -&gt; cbool:
-    return s1.strength &gt; s2.strength
+def weaker(s1: Strength, s2: Strength) -> cbool:
+    return s1.strength > s2.strength
 
 
 @inline
-def weakest_of(s1: Strength, s2: Strength) -&gt; Strength:
-    return s1 if s1.strength &gt; s2.strength else s2
+def weakest_of(s1: Strength, s2: Strength) -> Strength:
+    return s1 if s1.strength > s2.strength else s2
 
 
 @final
 class Strength:
-    def __init__(self, strength: int64, name: str) -&gt; None:
+    def __init__(self, strength: int64, name: str) -> None:
         self.strength: int64 = strength
         self.name: str = name
 
-    def next_weaker(self) -&gt; Strength:
+    def next_weaker(self) -> Strength:
         return STRENGTHS[self.strength]
 
 
@@ -115,15 +77,15 @@ STRENGTHS: CheckedList[Strength] = CheckedList[Strength]([
 
 class Constraint(object):
 
-    def __init__(self, strength: Strength) -&gt; None:
+    def __init__(self, strength: Strength) -> None:
         self.strength: Strength = strength
 
-    def add_constraint(self) -&gt; None:
+    def add_constraint(self) -> None:
         planner: Planner = get_planner()
         self.add_to_graph()
         planner.incremental_add(self)
 
-    def satisfy(self, mark: int64) -&gt; Constraint | None:
+    def satisfy(self, mark: int64) -> Constraint | None:
         planner: Planner = get_planner()
         self.choose_method(mark)
 
@@ -148,71 +110,71 @@ class Constraint(object):
         out.mark = mark
         return overridden
 
-    def destroy_constraint(self) -&gt; None:
+    def destroy_constraint(self) -> None:
         planner: Planner = get_planner()
         if self.is_satisfied():
             planner.incremental_remove(self)
         else:
             self.remove_from_graph()
 
-    def is_input(self) -&gt; cbool:
+    def is_input(self) -> cbool:
         return False
 
-    def mark_inputs(self, mark: int64) -&gt; None:
+    def mark_inputs(self, mark: int64) -> None:
         pass
 
-    def inputs_known(self, mark: int64) -&gt; cbool:
+    def inputs_known(self, mark: int64) -> cbool:
         return True
 
-    def choose_method(self, mark: int64) -&gt; None:
+    def choose_method(self, mark: int64) -> None:
         pass
 
-    def output(self) -&gt; Variable:
+    def output(self) -> Variable:
         raise NotImplementedError()
 
-    def execute(self) -&gt; None:
+    def execute(self) -> None:
         # The methods, THEY DO NOTHING.
         pass
 
 
 class UrnaryConstraint(Constraint):
 
-    def __init__(self, v: Variable, strength: Strength) -&gt; None:
+    def __init__(self, v: Variable, strength: Strength) -> None:
         Constraint.__init__(self, strength)
         self.my_output: Variable = v
         self.satisfied: cbool = False
         self.add_constraint()
 
-    def add_to_graph(self) -&gt; None:
+    def add_to_graph(self) -> None:
         self.my_output.add_constraint(self)
         self.satisfied = False
 
-    def choose_method(self, mark: int64) -&gt; None:
+    def choose_method(self, mark: int64) -> None:
         if self.my_output.mark != mark and \
                 stronger(self.strength, self.my_output.walk_strength):
             self.satisfied = True
         else:
             self.satisfied = False
 
-    def is_satisfied(self) -&gt; cbool:
+    def is_satisfied(self) -> cbool:
         return self.satisfied
 
-    def output(self) -&gt; Variable:
+    def output(self) -> Variable:
         # Ugh. Keeping it for consistency with the original. So much for
         # "we're all adults here"...
         return self.my_output
 
-    def recalculate(self) -&gt; None:
+    def recalculate(self) -> None:
         self.my_output.walk_strength = self.strength
         self.my_output.stay = not self.is_input()
 
         if self.my_output.stay:
             self.execute()
 
-    def mark_unsatisfied(self) -&gt; None:
+    def mark_unsatisfied(self) -> None:
         self.satisfied = False
 
-    def remove_from_graph(self) -&gt; None:
+    def remove_from_graph(self) -> None:
         if self.my_output is not None:
             self.my_output.remove_constraint(self)
             self.satisfied = False
@@ -226,7 +188,7 @@ class StayConstraint(UrnaryConstraint):
 @final
 class EditConstraint(UrnaryConstraint):
 
-    def is_input(self) -&gt; cbool:
+    def is_input(self) -> cbool:
         return True
 
 
@@ -240,14 +202,14 @@ class Direction(IntEnum):
 
 class BinaryConstraint(Constraint):
 
-    def __init__(self, v1: Variable, v2: Variable, strength: Strength) -&gt; None:
+    def __init__(self, v1: Variable, v2: Variable, strength: Strength) -> None:
         Constraint.__init__(self, strength)
         self.v1: Variable = v1
         self.v2: Variable = v2
         self.direction: Direction = Direction.NONE
         self.add_constraint()
 
-    def choose_method(self, mark: int64) -&gt; None:
+    def choose_method(self, mark: int64) -> None:
         if self.v1.mark == mark:
             if self.v2.mark != mark and stronger(self.strength, self.v2.walk_strength):
                 self.direction = Direction.FORWARD
@@ -271,26 +233,26 @@ class BinaryConstraint(Constraint):
             else:
                 self.direction = Direction.BACKWARD
 
-    def add_to_graph(self) -&gt; None:
+    def add_to_graph(self) -> None:
         self.v1.add_constraint(self)
         self.v2.add_constraint(self)
         self.direction = Direction.NONE
 
-    def is_satisfied(self) -&gt; cbool:
+    def is_satisfied(self) -> cbool:
         if self.direction != Direction.NONE:
             return True
         return False
 
-    def mark_inputs(self, mark: int64) -&gt; None:
+    def mark_inputs(self, mark: int64) -> None:
         self.input().mark = mark
 
-    def input(self) -&gt; Variable:
+    def input(self) -> Variable:
         return self.v1 if self.direction == Direction.FORWARD else self.v2
 
-    def output(self) -&gt; Variable:
+    def output(self) -> Variable:
         return self.v2 if self.direction == Direction.FORWARD else self.v1
 
-    def recalculate(self) -&gt; None:
+    def recalculate(self) -> None:
         ihn: Variable = self.input()
         out: Variable = self.output()
         out.walk_strength = weakest_of(self.strength, ihn.walk_strength)
@@ -299,10 +261,10 @@ class BinaryConstraint(Constraint):
         if out.stay:
             self.execute()
 
-    def mark_unsatisfied(self) -&gt; None:
+    def mark_unsatisfied(self) -> None:
         self.direction = Direction.NONE
 
-    def inputs_known(self, mark: int64) -&gt; cbool:
+    def inputs_known(self, mark: int64) -> cbool:
         i: Variable = self.input()
         return i.mark == mark or i.stay or cbool(i.determined_by is None)
 
@@ -319,13 +281,13 @@ class BinaryConstraint(Constraint):
 @final
 class ScaleConstraint(BinaryConstraint):
 
-    def __init__(self, src: Variable, scale: Variable, offset: Variable, dest: Variable, strength: Strength) -&gt; None:
+    def __init__(self, src: Variable, scale: Variable, offset: Variable, dest: Variable, strength: Strength) -> None:
         self.direction: Direction = Direction.NONE
         self.scale: Variable = scale
         self.offset: Variable = offset
         BinaryConstraint.__init__(self, src, dest, strength)
 
-    def add_to_graph(self) -&gt; None:
+    def add_to_graph(self) -> None:
         BinaryConstraint.add_to_graph(self)
         self.scale.add_constraint(self)
         self.offset.add_constraint(self)
@@ -339,19 +301,19 @@ class ScaleConstraint(BinaryConstraint):
         if self.offset is not None:
             self.offset.remove_constraint(self)
 
-    def mark_inputs(self, mark: int64) -&gt; None:
+    def mark_inputs(self, mark: int64) -> None:
         BinaryConstraint.mark_inputs(self, mark)
         self.scale.mark = mark
         self.offset.mark = mark
 
-    def execute(self) -&gt; None:
+    def execute(self) -> None:
         if self.direction == Direction.FORWARD:
             self.v2.value = self.v1.value * self.scale.value + self.offset.value
         else:
             self.v1.value = (
                                     self.v2.value - self.offset.value) / self.scale.value
 
-    def recalculate(self) -&gt; None:
+    def recalculate(self) -> None:
         ihn: Variable = self.input()
         out: Variable = self.output()
         out.walk_strength = weakest_of(self.strength, ihn.walk_strength)
@@ -364,14 +326,14 @@ class ScaleConstraint(BinaryConstraint):
 @final
 class EqualityConstraint(BinaryConstraint):
 
-    def execute(self) -&gt; None:
+    def execute(self) -> None:
         self.output().value = self.input().value
 
 
 @final
 class Variable(object):
 
-    def __init__(self, name: str, initial_value: int64 = 0) -&gt; None:
+    def __init__(self, name: str, initial_value: int64 = 0) -> None:
         self.name: str = name
         self.value: int64 = initial_value
         self.constraints: CheckedList[Constraint] = CheckedList[Constraint]()
@@ -380,10 +342,10 @@ class Variable(object):
         self.walk_strength: Strength = WEAKEST
         self.stay: cbool = True
 
-    def add_constraint(self, constraint: Constraint) -&gt; None:
+    def add_constraint(self, constraint: Constraint) -> None:
         self.constraints.append(constraint)
 
-    def remove_constraint(self, constraint: Constraint) -&gt; None:
+    def remove_constraint(self, constraint: Constraint) -> None:
         self.constraints.remove(constraint)
 
         if self.determined_by == constraint:
@@ -393,17 +355,17 @@ class Variable(object):
 @final
 class Planner(object):
 
-    def __init__(self) -&gt; None:
+    def __init__(self) -> None:
         self.current_mark: int64 = 0
 
-    def incremental_add(self, constraint: Constraint) -&gt; None:
+    def incremental_add(self, constraint: Constraint) -> None:
         mark: int64 = self.new_mark()
         overridden: Constraint | None = constraint.satisfy(mark)
 
         while overridden is not None:
             overridden = overridden.satisfy(mark)
 
-    def incremental_remove(self, constraint: Constraint) -&gt; None:
+    def incremental_remove(self, constraint: Constraint) -> None:
         out: Variable = constraint.output()
         constraint.mark_unsatisfied()
         constraint.remove_from_graph()
@@ -421,12 +383,12 @@ class Planner(object):
 
             repeat = strength != WEAKEST
 
-    def new_mark(self) -&gt; int64:
+    def new_mark(self) -> int64:
         x: int64 = self.current_mark + 1
         self.current_mark = x
         return self.current_mark
 
-    def make_plan(self, sources: CheckedList[UrnaryConstraint]) -&gt; Plan:
+    def make_plan(self, sources: CheckedList[UrnaryConstraint]) -> Plan:
         mark: int64 = self.new_mark()
         plan: Plan = Plan()
         todo: CheckedList[Constraint] = CheckedList[Constraint]([s for s in sources])
@@ -440,7 +402,7 @@ class Planner(object):
 
         return plan
 
-    def extract_plan_from_constraints(self, constraints: CheckedList[UrnaryConstraint]) -&gt; Plan:
+    def extract_plan_from_constraints(self, constraints: CheckedList[UrnaryConstraint]) -> Plan:
         sources: CheckedList[UrnaryConstraint] = CheckedList[UrnaryConstraint]()
         for c in constraints:
             if c.is_input() and c.is_satisfied():
@@ -448,7 +410,7 @@ class Planner(object):
 
         return self.make_plan(sources)
 
-    def add_propagate(self, c: Constraint, mark: int64) -&gt; cbool:
+    def add_propagate(self, c: Constraint, mark: int64) -> cbool:
         todo: CheckedList[Constraint] = CheckedList[Constraint]()
         todo.append(c)
 
@@ -464,7 +426,7 @@ class Planner(object):
 
         return True
 
-    def remove_propagate_from(self, out: Variable) -&gt; CheckedList[Constraint]:
+    def remove_propagate_from(self, out: Variable) -> CheckedList[Constraint]:
         out.determined_by = None
         out.walk_strength = WEAKEST
         out.stay = True
@@ -488,7 +450,7 @@ class Planner(object):
 
         return unsatisfied
 
-    def add_constraints_consuming_to(self, v: Variable, coll: CheckedList[Constraint]) -&gt; None:
+    def add_constraints_consuming_to(self, v: Variable, coll: CheckedList[Constraint]) -> None:
         determining: Constraint | None = v.determined_by
         cc: CheckedList[Constraint] = v.constraints
 
@@ -503,9 +465,9 @@ class Planner(object):
 @final
 class Plan(object):
 
-    def __init__(self) -&gt; None:
+    def __init__(self) -> None:
         self.v: CheckedList[Constraint] = CheckedList[Constraint]()
-    def add_constraint(self, c: Constraint) -&gt; None:
+    def add_constraint(self, c: Constraint) -> None:
         self.v.append(c)
 
     def __len__(self):
@@ -514,25 +476,25 @@ class Plan(object):
     def __getitem__(self, index):
         return self.v[index]
 
-    def execute(self) -&gt; None:
+    def execute(self) -> None:
         for c in self.v:
             c.execute()
 
 
 # Main
 
-def recreate_planner() -&gt; Planner:
+def recreate_planner() -> Planner:
     global planner
     planner = Planner()
     return planner
 
 
-def get_planner() -&gt; Planner:
+def get_planner() -> Planner:
     global planner
     return planner
 
 
-def chain_test(n: int64) -&gt; None:
+def chain_test(n: int64) -> None:
     """
     This is the standard DeltaBlue benchmark. A long chain of equality
     constraints is constructed with a stay constraint on one end. An
@@ -554,7 +516,7 @@ def chain_test(n: int64) -&gt; None:
     # We need to go up to n inclusively.
     i: int64 = 0
     end: int64 = n + 1
-    while i &lt; n + 1:
+    while i < n + 1:
         name = "v%s" % box(i)
         v = Variable(name)
 
@@ -581,7 +543,7 @@ def chain_test(n: int64) -&gt; None:
     plan = planner.extract_plan_from_constraints(edits)
 
     i = 0
-    while i &lt; 100:
+    while i < 100:
         first.value = i
         plan.execute()
 
@@ -591,7 +553,7 @@ def chain_test(n: int64) -&gt; None:
         i = i + 1
 
 
-def projection_test(n: int64) -&gt; None:
+def projection_test(n: int64) -> None:
     """
     This test constructs a two sets of variables related to each
     other by a simple linear transformation (scale and offset). The
@@ -606,7 +568,7 @@ def projection_test(n: int64) -&gt; None:
     dests: CheckedList[Variable] = CheckedList[Variable]()
     i: int64 = 0
     dst = Variable("dst%s" % 0, 0)
-    while i &lt; n:
+    while i < n:
         bi = box(i)
         src = Variable("src%s" % bi, i)
         dst = Variable("dst%s" % bi, i)
@@ -630,7 +592,7 @@ def projection_test(n: int64) -&gt; None:
     change(scale, 5)
 
     i = 0
-    while i &lt; n - 1:
+    while i < n - 1:
         if dests[i].value != (i * 5 + 1000):
             print("Projection 3 failed")
         i = i + 1
@@ -638,13 +600,13 @@ def projection_test(n: int64) -&gt; None:
     change(offset, 2000)
 
     i = 0
-    while i &lt; n - 1:
+    while i < n - 1:
         if dests[i].value != (i * 5 + 2000):
             print("Projection 4 failed")
         i = i + 1
 
 
-def change(v: Variable, new_value: int64) -&gt; None:
+def change(v: Variable, new_value: int64) -> None:
     planner: Planner = get_planner()
     edit = EditConstraint(v, PREFERRED)
     edits: CheckedList[UrnaryConstraint] = CheckedList[UrnaryConstraint]()
@@ -653,7 +615,7 @@ def change(v: Variable, new_value: int64) -&gt; None:
     plan = planner.extract_plan_from_constraints(edits)
 
     i: int64 = 0
-    while i &lt; 10:
+    while i < 10:
         v.value = new_value
         plan.execute()
         i = i + 1
@@ -666,7 +628,7 @@ def change(v: Variable, new_value: int64) -&gt; None:
 planner = None
 
 
-def delta_blue(i: int) -&gt; None:
+def delta_blue(i: int) -> None:
     n = int64(i)
     chain_test(n)
     projection_test(n)
@@ -680,12 +642,3 @@ if __name__ == "__main__":
     endTime = time.time()
     runtime = endTime - startTime
     print(runtime)
-</textarea>
-      </div>
-    </div>
-    <div id="right"><pre id="info"></pre></div>
-    <div id="mouse-right"><pre id="mouse-info"></pre></div>
-  </div>
-  <script type="module" src="./demo.js"></script>
-</body>
-</html>
