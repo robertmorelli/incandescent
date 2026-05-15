@@ -5,33 +5,23 @@
   <title>Incandescent demo</title>
   <style>
     body { margin: 0; }
-    #grid { display: grid; grid-template-columns: minmax(0, 1fr) 32rem 32rem; height: 100vh; }
-    #left, #right, #mouse-right { min-width: 0; min-height: 0; overflow: hidden; }
-    #right, #mouse-right { border-left: 1px solid #ccc; }
-    .editor { position: relative; width: 100%; height: 100%; font: 14px/1.3 monospace; background: black; }
-    #expr-bg, #found-bg, #mouse-bg, #hilite, #source { box-sizing: border-box; position: absolute; inset: 0; margin: 0; padding: 8px; width: 100%; height: 100%; font: inherit; white-space: pre; overflow: auto; }
-    #expr-bg, #found-bg, #mouse-bg, #hilite { pointer-events: none; }
-    #source { z-index: 0; color: white; -webkit-text-fill-color: white; caret-color: white; background: black; resize: none; }
-    #expr-bg, #found-bg, #mouse-bg, #hilite { color: white; background: transparent; mix-blend-mode: multiply; }
-    #expr-bg { z-index: 1; }
-    #found-bg { z-index: 2; }
-    #mouse-bg { z-index: 3; }
-    #hilite { z-index: 4; opacity: .45; }
-    #info, #mouse-info { box-sizing: border-box; margin: 0; padding: 8px; width: 100%; height: 100%; overflow: auto; font: 14px/1.3 monospace; white-space: pre-wrap; }
-    .expr-hit { color: rgb(255 255 220); }
-    .found-hit { color: rgb(220 245 255); }
-    .mouse-hit { color: rgb(255 240 225); }
-    #hilite .Name { color: #0645ad; } #hilite .Number { color: #098658; } #hilite .String,#hilite .StringList { color: #a31515; }
-    #hilite .Call { color: #795e26; } #hilite .MemberAccess { color: #267f99; } #hilite .Operator { color: #af00db; }
+    #grid { display: grid; grid-template-columns: minmax(0, 1fr) 32rem; height: 100vh; }
+    #left, #right { min-width: 0; min-height: 0; overflow: hidden; }
+    #right { border-left: 1px solid #ccc; }
+    .editor { position: relative; width: 100%; height: 100%; font: 14px/1.3 monospace; }
+    #hilite, #source { box-sizing: border-box; position: absolute; inset: 0; margin: 0; padding: 8px; width: 100%; height: 100%; font: inherit; white-space: pre; overflow: auto; }
+    #hilite { pointer-events: none; mix-blend-mode: multiply; }
+    #source { color: transparent; caret-color: black; background: transparent; resize: none; }
+    #info { box-sizing: border-box; margin: 0; padding: 8px; width: 100%; height: 100%; overflow: auto; font: 14px/1.3 monospace; white-space: pre-wrap; }
+    .Name { color: #0645ad; } .Number { color: #098658; } .String,.StringList { color: #a31515; }
+    .Call { color: #795e26; } .MemberAccess { color: #267f99; }
+    .Operator { color: #af00db; }
   </style>
-</head>
+<script type="module" crossorigin src="./index-n3kee420.js"></script></head>
 <body>
   <div id="grid">
     <div id="left">
       <div class="editor">
-        <pre id="expr-bg"></pre>
-        <pre id="found-bg"></pre>
-        <pre id="mouse-bg"></pre>
         <pre id="hilite"></pre>
         <textarea id="source" spellcheck="false"># Copyright (c) Facebook, Inc. and its affiliates. (http://www.facebook.com)
 """
@@ -681,8 +671,7 @@ if __name__ == "__main__":
       </div>
     </div>
     <div id="right"><pre id="info"></pre></div>
-    <div id="mouse-right"><pre id="mouse-info"></pre></div>
   </div>
-  <script type="module" src="./demo.js"></script>
+  
 </body>
 </html>

@@ -53,11 +53,73 @@ export function walkAst(root: ParseNode, callback: WalkCallback): void {
 }
 
 export function collect_trees(sourceText: string): TreeMap {
-    const a = analyze_with_pyright(sourceText);
+    return collect_from_analysis(analyze_with_pyright(sourceText));
+}
+
+export function create_analysis_session() {
+    const console = new NullConsole();
+    const fs = new PyrightFileSystem(createFromRealFileSystem(undefined, console));
+    const sp = createServiceProvider(fs, console);
+    const cwd = typeof process !== 'undefined' && process.cwd ? process.cwd() : '/';
+    const root = UriEx.file(cwd, sp);
+    const configOptions = new ConfigOptions(root);
+    configOptions.typeshedPath = UriEx.file(`${cwd}/pyright/packages/pyright-internal/typeshed-fallback`, sp);
+    configOptions.stubPath = UriEx.file(`${cwd}/stubs`, sp);
+    configOptions.defaultExtraPaths = [UriEx.file(`${cwd}/stubs`, sp)];
+    configOptions.useLibraryCodeForTypes = true;
+    configOptions.indexing = true;
+
+    const service = new AnalyzerService('incandescent', sp, {
+        console,
+        hostFactory: () => new FullAccessHost(sp),
+        configOptions,
+        shouldRunAnalysis: () => true,
+    });
+    const uri = UriEx.file(`${cwd}/__incandescent_input.py`, sp);
+    let version = 0;
+
+    const analyze = (sourceText: string): Analysis => {
+        service.setFileOpened(uri, ++version, sourceText);
+        let guard = 0;
+        while (service.test_program.analyze() && guard++ < 1000) {}
+        const sourceFile = service.test_program.getBoundSourceFile(uri);
+        const parseResults = sourceFile.getParseResults();
+        const lines = line_starts(sourceText);
+        return {
+            sourceText,
+            root: parseResults.parserOutput.parseTree,
+            evaluator: service.test_program.evaluator,
+            diagnostics: sourceFile.getDiagnostics?.() ?? [],
+            offsetAt: (range: any) => ({ start: offset_of(lines, range.start.line, range.start.character), end: offset_of(lines, range.end.line, range.end.character) }),
+        };
+    };
+
+    return {
+        analyze,
+        collect_trees(sourceText: string) { return collect_from_analysis(analyze(sourceText)); },
+        collect_trees_timed(sourceText: string) {
+            const t0 = performance.now();
+            const analysis = analyze(sourceText);
+            const t1 = performance.now();
+            const trees = collect_from_analysis(analysis);
+            const t2 = performance.now();
+            return {
+                trees,
+                timing: {
+                    service_ms: +(t1 - t0).toFixed(2),
+                    tree_build_ms: +(t2 - t1).toFixed(2),
+                    total_collect_ms: +(t2 - t0).toFixed(2),
+                },
+            };
+        },
+    };
+}
+
+function collect_from_analysis(a: Analysis): TreeMap {
     const highlights = collect_highlights(a.root);
     const expression_types = collect_expression_types(a);
     const { definitions, identifier_definitions, identifier_uses } = collect_identifier_tables(a);
-    const { lines, line_to_char_range } = collect_lines(sourceText);
+    const { lines, line_to_char_range } = collect_lines(a.sourceText);
     return {
         highlights,
         expression_types,
@@ -86,7 +148,7 @@ export function collect_expression_types(a: Analysis): PrioritySegTree {
     const ranges: seg_item[] = [];
     walkAst(a.root, (node, ctx) => {
         if (!EXPRESSION_NODE_TYPES.has(node_kind(node))) return;
-        const type = pyright_type(a.evaluator, node);
+        const type = pyright_type_with_recovery(a, node);
         if (type) ranges.push({ start: node.start, end: node.start + node.length, height: ctx.depth, payload: { type, node }, id: ranges.length });
     });
     return new PrioritySegTree(ranges);
@@ -115,40 +177,7 @@ export function buildSourceAnnotationTree(sourceText: string): PrioritySegTree {
 export function buildSourceDefinitionTree(sourceText: string): PrioritySegTree { return collect_trees(sourceText).identifier_uses; }
 
 function analyze_with_pyright(sourceText: string): Analysis {
-    const console = new NullConsole();
-    const fs = new PyrightFileSystem(createFromRealFileSystem(undefined, console));
-    const sp = createServiceProvider(fs, console);
-    const cwd = typeof process !== 'undefined' && process.cwd ? process.cwd() : '/';
-    const root = UriEx.file(cwd, sp);
-    const configOptions = new ConfigOptions(root);
-    configOptions.typeshedPath = UriEx.file(`${cwd}/pyright/packages/pyright-internal/typeshed-fallback`, sp);
-    configOptions.stubPath = UriEx.file(`${cwd}/stubs`, sp);
-    configOptions.defaultExtraPaths = [UriEx.file(`${cwd}/stubs`, sp)];
-    configOptions.useLibraryCodeForTypes = true;
-    configOptions.indexing = true;
-
-    const service = new AnalyzerService('incandescent', sp, {
-        console,
-        hostFactory: () => new FullAccessHost(sp),
-        configOptions,
-        shouldRunAnalysis: () => true,
-    });
-
-    const uri = UriEx.file(`${cwd}/__incandescent_input.py`, sp);
-    service.setFileOpened(uri, 1, sourceText);
-    let guard = 0;
-    while (service.test_program.analyze() && guard++ < 1000) {}
-
-    const sourceFile = service.test_program.getBoundSourceFile(uri);
-    const parseResults = sourceFile.getParseResults();
-    const lines = line_starts(sourceText);
-    return {
-        sourceText,
-        root: parseResults.parserOutput.parseTree,
-        evaluator: service.test_program.evaluator,
-        diagnostics: sourceFile.getDiagnostics?.() ?? [],
-        offsetAt: (range: any) => ({ start: offset_of(lines, range.start.line, range.start.character), end: offset_of(lines, range.end.line, range.end.character) }),
-    };
+    return create_analysis_session().analyze(sourceText);
 }
 
 function collect_identifier_tables(a: Analysis, known = new Map<string, DefinitionInfo>()) {
@@ -163,7 +192,7 @@ function collect_identifier_tables(a: Analysis, known = new Map<string, Definiti
         const key = `${decl.start}:${decl.end}:${decl.name}`;
         if (!definitions.has(key)) definitions.set(key, { id: nextId++, ...decl });
         const definition = definitions.get(key)!;
-        const type = pyright_type(a.evaluator, node);
+        const type = pyright_type_with_recovery(a, node);
         if (type && !definition.type) definition.type = type;
         identifier_uses.push({ start: node.start, end: node.start + node.length, height: ctx.depth, payload: { definition, name: definition.name, type, node }, id: identifier_uses.length });
     });
@@ -179,6 +208,47 @@ function pyright_type(evaluator: any, node: ParseNode): string | undefined {
     } catch { return undefined; }
 }
 
+function pyright_type_with_recovery(a: Analysis, node: ParseNode): string | undefined {
+    const raw = pyright_type(a.evaluator, node);
+    return raw && raw !== 'Any' && raw !== 'Unknown' ? raw : recover_closed_world_member_type(a, node) ?? raw;
+}
+
+function recover_closed_world_member_type(a: Analysis, node: ParseNode): string | undefined {
+    const isCall = node_kind(node) === 'Call';
+    const memberNode = node_kind(node) === 'MemberAccess' ? (node.d as any)?.member : isCall && node_kind((node.d as any)?.leftExpr) === 'MemberAccess' ? ((node.d as any).leftExpr.d as any)?.member : undefined;
+    const baseNode = node_kind(node) === 'MemberAccess' ? (node.d as any)?.leftExpr : isCall && node_kind((node.d as any)?.leftExpr) === 'MemberAccess' ? ((node.d as any).leftExpr.d as any)?.leftExpr : undefined;
+    if (!memberNode || !baseNode) return undefined;
+
+    const baseText = pyright_type(a.evaluator, baseNode);
+    const memberName = read_name(memberNode, a.sourceText);
+    if (!baseText || !memberName) return undefined;
+
+    const found: string[] = [];
+    walkAst(a.root, cls => {
+        if (node_kind(cls) !== 'Class') return;
+        const result = a.evaluator.getTypeOfClass?.(cls);
+        const ct = result?.classType;
+        const names = ct?.shared?.mro?.map((m: any) => m?.shared?.name).filter(Boolean) ?? [];
+        if (!names.includes(baseText)) return;
+        const sym = ct?.shared?.fields?.get?.(memberName);
+        if (!sym) return;
+        try {
+            const t = a.evaluator.getEffectiveTypeOfSymbol(sym);
+            const printed = a.evaluator.printType(t, { enforcePythonSyntax: true, printUnknownWithAny: true, omitTypeArgsIfUnknown: false });
+            const recovered = isCall ? callable_return_type(printed) : printed;
+            if (recovered && recovered !== 'Any' && recovered !== 'Unknown') found.push(recovered);
+        } catch {}
+    });
+
+    const unique = [...new Set(found)];
+    return unique.length === 1 ? unique[0] : unique.length > 1 ? unique.join(' | ') : undefined;
+}
+
+function callable_return_type(typeText: string): string | undefined {
+    const match = /^Callable\[(?:\.\.\.|\[[^\]]*\]),\s*(.*)\]$/.exec(typeText);
+    return match?.[1] ?? typeText;
+}
+
 function pyright_decl(a: Analysis, node: ParseNode): Omit<DefinitionInfo, 'id'> | undefined {
     try {
         const nameNode = node_kind(node) === 'Call' ? (node.d as any)?.leftExpr : node_kind(node) === 'MemberAccess' ? (node.d as any)?.member : node;
@@ -187,7 +257,7 @@ function pyright_decl(a: Analysis, node: ParseNode): Omit<DefinitionInfo, 'id'> 
         const decl = info?.decls?.[0];
         if (!decl?.range) return undefined;
         const range = a.offsetAt(decl.range);
-        return { name: read_name(nameNode, a.sourceText), start: range.start, end: range.end, type: pyright_type(a.evaluator, node) };
+        return { name: read_name(nameNode, a.sourceText), start: range.start, end: range.end, type: pyright_type_with_recovery(a, node) };
     } catch { return undefined; }
 }
 
