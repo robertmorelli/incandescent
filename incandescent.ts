@@ -9,11 +9,12 @@ import { UriEx } from './pyright/packages/pyright-internal/out/packages/pyright-
 import { ParseNodeTypeNameMap } from './pyright/packages/pyright-internal/out/packages/pyright-internal/src/parser/parseNodeUtils.js';
 import { PyrightFileSystem } from './pyright/packages/pyright-internal/out/packages/pyright-internal/src/pyrightFileSystem.js';
 import type { DefinitionInfo, NodeInfo, ParseNode, SourceInfo, WalkCallback } from './defs.ts';
-import { EXPRESSION_NODE_TYPES, HIGHLIGHT_NODE_TYPES, PrioritySegTree, USE_NODE_TYPES, type seg_item } from './utility.ts';
+import { EXPRESSION_NODE_TYPES, PrioritySegTree, USE_NODE_TYPES, type seg_item } from './utility.ts';
 
 type Analysis = {
     sourceText: string;
     root: ParseNode;
+    parseResults: any;
     evaluator: any;
     diagnostics: unknown[];
     offsetAt: (range: any) => { start: number; end: number };
@@ -88,6 +89,7 @@ export function create_analysis_session() {
         return {
             sourceText,
             root: parseResults.parserOutput.parseTree,
+            parseResults,
             evaluator: service.test_program.evaluator,
             diagnostics: sourceFile.getDiagnostics?.() ?? [],
             offsetAt: (range: any) => ({ start: offset_of(lines, range.start.line, range.start.character), end: offset_of(lines, range.end.line, range.end.character) }),
@@ -116,7 +118,7 @@ export function create_analysis_session() {
 }
 
 function collect_from_analysis(a: Analysis): TreeMap {
-    const highlights = collect_highlights(a.root);
+    const highlights = collect_highlights(a);
     const expression_types = collect_expression_types(a);
     const { definitions, identifier_definitions, identifier_uses } = collect_identifier_tables(a);
     const { lines, line_to_char_range } = collect_lines(a.sourceText);
@@ -135,12 +137,29 @@ function collect_from_analysis(a: Analysis): TreeMap {
     };
 }
 
-export function collect_highlights(root: ParseNode): PrioritySegTree {
+export function collect_highlights(a: Analysis): PrioritySegTree {
     const ranges: seg_item[] = [];
-    walkAst(root, (node, ctx) => {
-        const kind = node_kind(node);
-        if (HIGHLIGHT_NODE_TYPES.has(kind)) ranges.push({ start: node.start, end: node.start + node.length, height: ctx.depth, payload: { kind, node }, id: ranges.length });
+    const add = (start: number, end: number, height: number, kind: string, node = {} as ParseNode) => {
+        if (Number.isFinite(start) && Number.isFinite(end) && end > start) {
+            ranges.push({ start, end, height, payload: { kind, node }, id: ranges.length });
+        }
+    };
+
+    const tokens = a.parseResults.tokenizerOutput.tokens._items ?? a.parseResults.tokenizerOutput.tokens;
+    for (const token of tokens) {
+        for (const c of token.comments ?? []) add(c.start, c.start + c.length, 10, 'comment');
+        const kind = token_kind(token);
+        if (kind) add(token.start, token.start + token.length, 20, kind);
+    }
+
+    walkAst(a.root, (node, ctx) => {
+        const d = node.d as any, kind = node_kind(node);
+        if (kind === 'Function') add(d?.name?.start, d?.name?.start + d?.name?.length, 100 + ctx.depth, 'Function', d?.name);
+        if (kind === 'Class') add(d?.name?.start, d?.name?.start + d?.name?.length, 100 + ctx.depth, 'Class', d?.name);
+        if (kind === 'Call') add(d?.leftExpr?.start, d?.leftExpr?.start + d?.leftExpr?.length, 100 + ctx.depth, 'Call', d?.leftExpr);
+        if (kind === 'MemberAccess') add(d?.member?.start, d?.member?.start + d?.member?.length, 100 + ctx.depth, 'MemberAccess', d?.member);
     });
+
     return new PrioritySegTree(ranges);
 }
 
@@ -325,5 +344,24 @@ function collectNodes(root: ParseNode, sourceText: string): NodeInfo[] {
 
 function line_starts(s: string) { const out = [0]; for (let i = 0; i < s.length; i++) if (s[i] === '\n') out.push(i + 1); return out; }
 function offset_of(starts: number[], line: number, char: number) { return (starts[line] ?? 0) + char; }
+function token_kind(token: any): string | undefined {
+    switch (token.type) {
+        case 5: case 24: case 25: case 26: return 'String';
+        case 6: return 'Number';
+        case 7: return 'Name';
+        case 8: return keyword_kind(token.keywordType);
+        case 9: case 10: case 11: case 12: case 13: case 14: case 15: case 16: case 17: case 18: case 19: case 20: case 21: case 23: return 'Operator';
+        default: return undefined;
+    }
+}
+
+function keyword_kind(keywordType: number): string {
+    // KeywordType: class=7 def=10 import=21 from=18 as=1 etc. These numbers are Pyright's tokenizer output.
+    if ([7, 10, 18, 21, 1].includes(keywordType)) return 'keyword';
+    if ([12, 13, 17, 34, 36, 27, 0, 29, 28, 22, 19, 39, 37].includes(keywordType)) return 'control';
+    if ([15, 16, 26, 33, 14].includes(keywordType)) return 'builtin';
+    return 'keyword';
+}
+
 const node_kind = (node: ParseNode) => ParseNodeTypeNameMap[node.nodeType] ?? String(node.nodeType);
 const read_name = (node: ParseNode | undefined, sourceText: string) => node ? String((node.d as any)?.value ?? sourceText.slice(node.start, node.start + node.length)) : '';

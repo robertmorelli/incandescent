@@ -4,36 +4,31 @@
   <meta charset="utf-8" />
   <title>Incandescent demo</title>
   <style>
-    body { margin: 0; }
+    body { margin: 0; background: #292d3e; }
     #grid { display: grid; grid-template-columns: minmax(0, 1fr) 32rem 32rem; height: 100vh; }
     #left, #right, #mouse-right { min-width: 0; min-height: 0; overflow: hidden; }
-    #right, #mouse-right { border-left: 1px solid #ccc; }
-    .editor { position: relative; width: 100%; height: 100%; font: 14px/1.3 monospace; background: black; }
-    #expr-bg, #found-bg, #mouse-bg, #hilite, #source { box-sizing: border-box; position: absolute; inset: 0; margin: 0; padding: 8px; width: 100%; height: 100%; font: inherit; white-space: pre; overflow: auto; }
-    #expr-bg, #found-bg, #mouse-bg, #hilite { pointer-events: none; }
-    #source { z-index: 0; color: white; -webkit-text-fill-color: white; caret-color: white; background: black; resize: none; }
-    #expr-bg, #found-bg, #mouse-bg, #hilite { color: white; background: transparent; mix-blend-mode: multiply; }
-    #expr-bg { z-index: 1; }
-    #found-bg { z-index: 2; }
-    #mouse-bg { z-index: 3; }
-    #hilite { z-index: 4; opacity: .45; }
-    #info, #mouse-info { box-sizing: border-box; margin: 0; padding: 8px; width: 100%; height: 100%; overflow: auto; font: 14px/1.3 monospace; white-space: pre-wrap; }
-    .expr-hit { color: rgb(255 255 220); }
-    .found-hit { color: rgb(220 245 255); }
-    .mouse-hit { color: rgb(255 240 225); }
-    #hilite .Name { color: #0645ad; } #hilite .Number { color: #098658; } #hilite .String,#hilite .StringList { color: #a31515; }
-    #hilite .Call { color: #795e26; } #hilite .MemberAccess { color: #267f99; } #hilite .Operator { color: #af00db; }
+    #right, #mouse-right { border-left: 1px solid #404661; }
+    .editor { position: relative; width: 100%; height: 100%; font: 14px/1.3 monospace; background: #292d3e; }
+    #bg, #editor { box-sizing: border-box; position: absolute; inset: 0; margin: 0; padding: 8px; width: 100%; height: 100%; font: inherit; white-space: pre; overflow: auto; }
+    #bg { z-index: 0; pointer-events: none; color: transparent; background: #292d3e; }
+    #editor { z-index: 1; outline: none; color: #ffffff; background: transparent; caret-color: #fffbe8; }
+    #info, #mouse-info { box-sizing: border-box; margin: 0; padding: 8px; width: 100%; height: 100%; overflow: auto; font: 14px/1.3 monospace; white-space: pre-wrap; color: #ffffff; background: #292d3e; }
+    #editor .Name { color: #ffffff; } #editor .Number { color: #fdffab; } #editor .String,#editor .StringList { color: #c8ffa7; background: #374048; }
+    #editor .Call,#editor .Function { color: #9ce7ff; } #editor .MemberAccess { color: #ffffff; } #editor .Operator { color: #ffaff3; }
+    #editor .Class,#editor .TypeAnnotation,#editor .Parameter { color: #ffddfa; }
+    #editor .Import,#editor .ImportFrom,#editor .ImportAs,#editor .ImportFromAs { color: #fe7ab2; font-style: italic; }
+    #editor .keyword { color: #fe7ab2; font-style: italic; }
+    #editor .control { color: #ffd596; font-style: italic; }
+    #editor .builtin { color: #fe7ab2; font-style: italic; }
+    #editor .comment { color: #c4c4c4; background: #373B4A; }
+    .expr-hit { background: #363b52; }
+    .found-hit { background: #004961; }
+    .mouse-hit { background: #613c00; }
   </style>
 </head>
 <body>
   <div id="grid">
-    <div id="left">
-      <div class="editor">
-        <pre id="expr-bg"></pre>
-        <pre id="found-bg"></pre>
-        <pre id="mouse-bg"></pre>
-        <pre id="hilite"></pre>
-        <textarea id="source" spellcheck="false"># Copyright (c) Facebook, Inc. and its affiliates. (http://www.facebook.com)
+    <div id="left"><div class="editor"><pre id="bg"></pre><pre id="editor" contenteditable="true" spellcheck="false"># Copyright (c) Facebook, Inc. and its affiliates. (http://www.facebook.com)
 """
 main.py
 ============
@@ -677,9 +672,7 @@ if __name__ == "__main__":
     endTime = time.time()
     runtime = endTime - startTime
     print(runtime)
-</textarea>
-      </div>
-    </div>
+</pre></div></div>
     <div id="right"><pre id="info"></pre></div>
     <div id="mouse-right"><pre id="mouse-info"></pre></div>
   </div>

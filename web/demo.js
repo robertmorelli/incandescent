@@ -1,77 +1,117 @@
-const src = document.getElementById('source');
-const exprBg = document.getElementById('expr-bg');
-const foundBg = document.getElementById('found-bg');
-const mouseBg = document.getElementById('mouse-bg');
-const pre = document.getElementById('hilite');
+const editor = document.getElementById('editor');
+const bg = document.getElementById('bg');
 const info = document.getElementById('info');
 const mouseInfo = document.getElementById('mouse-info');
-let highlights = [], dirty = true, seq = 0, latestSeq = 0, lastTiming = null, lastMouseXY = null;
 const ws = new WebSocket(`ws://${location.host}/ws`);
-const esc = s => s.replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
-const blocks = s => s.replace(/[^\n]/g, '█');
+
+let highlights = [], seq = 0, latestSeq = 0, timing = null;
+let cursorExpr = null, cursorFound = null, mouseExpr = null, lastMouse = null;
+
+const esc = s => s.replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
+const source = () => editor.innerText;
+const fg = {
+  Name: 'color:#ffffff', Number: 'color:#fdffab', String: 'color:#c8ffa7;background:#374048', StringList: 'color:#c8ffa7;background:#374048',
+  Call: 'color:#9ce7ff', Function: 'color:#9ce7ff', MemberAccess: 'color:#ffffff', Operator: 'color:#ffaff3',
+  Class: 'color:#ffddfa', TypeAnnotation: 'color:#ffddfa', Parameter: 'color:#ffddfa',
+  Import: 'color:#fe7ab2;font-style:italic', ImportFrom: 'color:#fe7ab2;font-style:italic', ImportAs: 'color:#fe7ab2;font-style:italic', ImportFromAs: 'color:#fe7ab2;font-style:italic',
+  keyword: 'color:#fe7ab2;font-style:italic', control: 'color:#ffd596;font-style:italic', builtin: 'color:#fe7ab2;font-style:italic', comment: 'color:#c4c4c4;background:#373B4A',
+};
+const bgStyle = {
+  expr: 'background:rgba(255,255,210,.18)', found: 'background:rgba(210,240,255,.16)', mouse: 'background:rgba(255,235,215,.16)'
+};
 
 ws.onopen = analyze;
-ws.onmessage = ev => {
-  const msg = JSON.parse(ev.data);
+ws.onmessage = e => {
+  const msg = JSON.parse(e.data);
   if (msg.kind === 'analyze') {
-    if (msg.seq && msg.seq < latestSeq) return;
+    if (msg.seq < latestSeq) return;
     msg.timing.transport_roundtrip_ms = +(performance.now() - msg.client_sent_at).toFixed(2);
     msg.timing.transport_minus_server_ms = +(msg.timing.transport_roundtrip_ms - msg.timing.server_total_ms).toFixed(2);
-    highlights = msg.highlights; dirty = false; lastTiming = msg.timing; paint();
-    show_info(); if (lastMouseXY) show_mouse_at(lastMouseXY.x, lastMouseXY.y);
+    highlights = msg.highlights; timing = msg.timing; render(); showCursor(); if (lastMouse) showMouseAt(lastMouse.x, lastMouse.y);
   }
   if (msg.kind === 'info') {
-    const data = { ...msg.data, timing: lastTiming };
-    (msg.target === 'mouse' ? mouseInfo : info).innerText = JSON.stringify(data, null, 2);
-    if (msg.target === 'mouse') mouseBg.innerHTML = range_html(msg.data.expression_range, 'mouse-hit');
-    else { exprBg.innerHTML = range_html(msg.data.expression_range, 'expr-hit'); foundBg.innerHTML = range_html(msg.data.found_range, 'found-hit'); }
+    const data = { ...msg.data, timing };
+    if (msg.target === 'mouse') { mouseInfo.innerText = JSON.stringify(data, null, 2); mouseExpr = msg.data.expression_range; }
+    else { info.innerText = JSON.stringify(data, null, 2); cursorExpr = msg.data.expression_range; cursorFound = msg.data.found_range; }
+    renderBg();
   }
 };
 
+function analyze() { latestSeq = ++seq; send({ kind: 'analyze', seq: latestSeq, client_sent_at: performance.now(), source: source() }); }
 function send(x) { if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(x)); }
-function analyze() { latestSeq = ++seq; send({ kind: 'analyze', seq: latestSeq, client_sent_at: performance.now(), source: src.value }); }
-function changed() { dirty = true; analyze(); }
-function paint() {
-  const s = src.value;
-  let html = '', at = 0, kind = '';
-  for (let i = 0; i < s.length; i++) {
-    const hit = best(highlights, [[i, i + 1]])?.payload.kind ?? '';
-    const k = /[+\-*/%@<>=!&|^~]/.test(s[i] ?? '') && /Operation/.test(hit) ? 'Operator' : hit.replace(/.*Operation/, '');
-    if (k !== kind) { html += span(kind, s.slice(at, i)); at = i; kind = k; }
-  }
-  pre.innerHTML = html + span(kind, s.slice(at));
-}
-function span(kind, text) { return kind ? `<span class="${kind}">${esc(blocks(text))}</span>` : esc(blocks(text)); }
-function range_html(r, cls) {
-  const s = src.value;
-  if (!r) return esc(blocks(s));
-  return esc(blocks(s.slice(0, r.start))) + `<span class="${cls}">${esc(blocks(s.slice(r.start, r.end)))}</span>` + esc(blocks(s.slice(r.end)));
-}
-function best(ranges, spans) { return spans.flatMap(([s,e]) => ranges.filter(r => r.start <= s && r.end >= e)).sort((a,b) => b.height - a.height)[0]; }
-function show_info() { send({ kind: 'info', target: 'cursor', start: src.selectionStart, end: src.selectionEnd }); }
-let lastMouse = 0;
-function show_mouse(e) { lastMouseXY = { x: e.clientX, y: e.clientY }; if (dirty || Date.now() - lastMouse < 80) return; lastMouse = Date.now(); show_mouse_at(e.clientX, e.clientY); }
-function show_mouse_at(x, y) { const pos = offset_from_point(x, y); send({ kind: 'info', target: 'mouse', start: pos, end: pos }); }
-function offset_from_point(clientX, clientY) {
-  const p = text_position_from_point(clientX, clientY);
-  if (p != null) return p;
-  const cs = getComputedStyle(src), r = src.getBoundingClientRect();
-  const x = clientX - r.left - parseFloat(cs.paddingLeft) + src.scrollLeft;
-  const y = clientY - r.top - parseFloat(cs.paddingTop) + src.scrollTop;
-  const lines = src.value.split('\n');
-  const row = Math.max(0, Math.min(lines.length - 1, Math.floor(y / parseFloat(cs.lineHeight))));
-  let off = 0; for (let i = 0; i < row; i++) off += lines[i].length + 1;
-  return off + Math.min(Math.max(0, Math.round(x / char_width())), lines[row].length);
-}
-function text_position_from_point(x, y) {
-  if (document.caretPositionFromPoint) { const p = document.caretPositionFromPoint(x, y); if (p?.offsetNode === src || p?.offsetNode?.parentNode === src) return p.offset; }
-  if (document.caretRangeFromPoint) { const r = document.caretRangeFromPoint(x, y); if (r?.startContainer === src || r?.startContainer?.parentNode === src) return r.startOffset; }
-  return null;
-}
-let cw = 0;
-function char_width() { if (cw) return cw; const m = document.createElement('span'); m.style.cssText = `position:fixed;left:-9999px;white-space:pre;font:${getComputedStyle(src).font}`; m.textContent = 'M'; document.body.append(m); cw = m.getBoundingClientRect().width; m.remove(); return cw; }
 
-src.addEventListener('input', changed);
-src.addEventListener('scroll', () => { for (const el of [exprBg, foundBg, mouseBg, pre]) { el.scrollTop = src.scrollTop; el.scrollLeft = src.scrollLeft; } });
-src.addEventListener('mousemove', show_mouse);
-src.addEventListener('mouseup', show_info); src.addEventListener('keyup', show_info); src.addEventListener('select', show_info); src.addEventListener('click', show_info);
+function saveCaret() {
+  const sel = getSelection();
+  if (!sel.rangeCount) return 0;
+  const r = sel.getRangeAt(0).cloneRange();
+  r.selectNodeContents(editor);
+  r.setEnd(sel.anchorNode, sel.anchorOffset);
+  return r.toString().length;
+}
+function restoreCaret(pos) {
+  const walker = document.createTreeWalker(editor, NodeFilter.SHOW_TEXT);
+  let node, seen = 0;
+  while ((node = walker.nextNode())) {
+    const next = seen + node.nodeValue.length;
+    if (pos <= next) {
+      const r = document.createRange();
+      r.setStart(node, pos - seen);
+      r.collapse(true);
+      getSelection().removeAllRanges();
+      getSelection().addRange(r);
+      return;
+    }
+    seen = next;
+  }
+}
+
+function render() {
+  const pos = saveCaret();
+  const s = source();
+  editor.innerHTML = markup(s, syntaxMarks(s));
+  restoreCaret(pos);
+  renderBg();
+}
+function renderBg() {
+  const s = source();
+  bg.innerHTML = markup(s, [
+    cursorExpr && { ...cursorExpr, style: bgStyle.expr },
+    cursorFound && { ...cursorFound, style: bgStyle.found },
+    mouseExpr && { ...mouseExpr, style: bgStyle.mouse },
+  ].filter(Boolean));
+}
+function markup(s, marks) {
+  const style = Array(s.length).fill('');
+  for (const m of marks) for (let i = Math.max(0, m.start); i < Math.min(s.length, m.end); i++) style[i] = m.style;
+  let html = '', start = 0, cur = style[0] || '';
+  for (let i = 1; i <= s.length; i++) if ((style[i] || '') !== cur || i === s.length) {
+    const chunk = esc(s.slice(start, i));
+    html += cur ? `<span style="${cur}">${chunk}</span>` : chunk;
+    start = i; cur = style[i] || '';
+  }
+  return html;
+}
+function syntaxMarks(_s) {
+  return highlights
+    .map(h => ({ start: h.start, end: h.end, style: fg[h.payload.kind] }))
+    .filter(m => m.style);
+}
+
+function caret() { return saveCaret(); }
+function showCursor() { const p = caret(); send({ kind: 'info', target: 'cursor', start: p, end: p }); }
+function showMouse(e) { lastMouse = { x: e.clientX, y: e.clientY }; showMouseAt(e.clientX, e.clientY); }
+function showMouseAt(x, y) { const p = offsetFromPoint(x, y); send({ kind: 'info', target: 'mouse', start: p, end: p }); }
+function offsetFromPoint(x, y) {
+  const p = document.caretPositionFromPoint?.(x, y); if (p) return rangeOffset(p.offsetNode, p.offset);
+  const r = document.caretRangeFromPoint?.(x, y); if (r) return rangeOffset(r.startContainer, r.startOffset);
+  return caret();
+}
+function rangeOffset(node, offset) { const r = document.createRange(); r.selectNodeContents(editor); r.setEnd(node, offset); return r.toString().length; }
+
+editor.addEventListener('input', () => { analyze(); });
+editor.addEventListener('keyup', showCursor);
+editor.addEventListener('mouseup', showCursor);
+editor.addEventListener('click', showCursor);
+editor.addEventListener('mousemove', showMouse);
+editor.addEventListener('scroll', () => { bg.scrollTop = editor.scrollTop; bg.scrollLeft = editor.scrollLeft; });
+render();

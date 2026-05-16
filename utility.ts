@@ -7,7 +7,10 @@ export const EXPRESSION_NODE_TYPES = new Set([
     'Ternary', 'Tuple', 'UnaryOperation', 'Unpack', 'Yield', 'YieldFrom', 'Assignment', 'TypeAnnotation', 'Parameter'
 ]);
 
-export const HIGHLIGHT_NODE_TYPES = new Set(['Name', 'Number', 'String', 'StringList', 'Call', 'MemberAccess', 'BinaryOperation', 'UnaryOperation']);
+export const HIGHLIGHT_NODE_TYPES = new Set([
+    'Name', 'Number', 'String', 'StringList', 'Call', 'MemberAccess', 'BinaryOperation', 'UnaryOperation',
+    'Function', 'Class', 'TypeAnnotation', 'Parameter', 'Import', 'ImportFrom', 'ImportAs', 'ImportFromAs'
+]);
 export const USE_NODE_TYPES = new Set(['Name', 'MemberAccess', 'Call']);
 
 export type SegPayload = { type?: string; definition?: DefinitionInfo; name?: string; kind?: string; node: ParseNode };
