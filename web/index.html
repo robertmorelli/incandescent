@@ -4,39 +4,55 @@
   <meta charset="utf-8" />
   <title>Incandescent demo</title>
   <style>
-    body { margin: 0; background: #292d3e; }
-    #grid { display: grid; grid-template-columns: minmax(0, 1fr) 32rem 32rem; height: 100vh; }
+    body { margin: 0; background: #292d3e; color: #fff; font: 14px/1.3 monospace; }
+    #grid { display: grid; grid-template-columns: minmax(0, 1fr) 28rem 28rem; height: 100vh; }
     #left, #right, #mouse-right { min-width: 0; min-height: 0; overflow: hidden; }
-    #right, #mouse-right { border-left: 1px solid #404661; }
-    .editor { position: relative; width: 100%; height: 100%; font: 14px/1.3 monospace; background: #292d3e; }
-    #bg, #editor, .layer { box-sizing: border-box; position: absolute; inset: 0; margin: 0; padding: 8px; width: 100%; height: 100%; font: inherit; white-space: pre; overflow: auto; }
-    #bg { z-index: 0; pointer-events: none; color: transparent; background: #292d3e; }
-    .layer { pointer-events: none; color: transparent; background: transparent; overflow: hidden; }
-    .layer.red    { z-index: 1; } .layer.red    span { background: rgba(255,  60,  60, .60) !important; }
-    .layer.orange { z-index: 2; } .layer.orange span { background: rgba(255, 150,  60, .60) !important; }
-    .layer.yellow { z-index: 3; } .layer.yellow span { background: rgba(255, 230,  90, .55) !important; }
-    .layer.green  { z-index: 4; } .layer.green  span { background: rgba(110, 230, 120, .55) !important; }
-    .layer.blue   { z-index: 5; } .layer.blue   span { background: rgba( 90, 170, 255, .60) !important; }
-    .layer.indigo { z-index: 6; } .layer.indigo span { background: rgba(140, 110, 230, .65) !important; }
-    .layer.violet { z-index: 7; } .layer.violet span { background: rgba(220, 130, 230, .60) !important; }
-    #editor { z-index: 10; outline: none; color: #ffffff; background: transparent; caret-color: #fffbe8; }
-    #info, #mouse-info { box-sizing: border-box; margin: 0; padding: 8px; width: 100%; height: 100%; overflow: auto; font: 14px/1.3 monospace; white-space: pre-wrap; color: #ffffff; background: #292d3e; }
-    #editor .Name { color: #ffffff; } #editor .Number { color: #fdffab; } #editor .String,#editor .StringList { color: #c8ffa7; background: #374048; }
-    #editor .Call,#editor .Function { color: #9ce7ff; } #editor .MemberAccess { color: #ffffff; } #editor .Operator { color: #ffaff3; }
-    #editor .Class,#editor .TypeAnnotation,#editor .Parameter { color: #ffddfa; }
-    #editor .Import,#editor .ImportFrom,#editor .ImportAs,#editor .ImportFromAs { color: #fe7ab2; font-style: italic; }
-    #editor .keyword { color: #fe7ab2; font-style: italic; }
-    #editor .control { color: #ffd596; font-style: italic; }
-    #editor .builtin { color: #fe7ab2; font-style: italic; }
-    #editor .comment { color: #c4c4c4; background: #373B4A; }
-    .expr-hit { background: #363b52; }
-    .found-hit { background: #004961; }
-    .mouse-hit { background: #613c00; }
+    #right, #mouse-right { border-left: 1px solid #404661; overflow: auto; padding: 8px; }
+    #default-source { display: none; }
+
+    /* View stack: bg + 7 rainbow layers + main pre, all in one grid cell.
+       The grid container is the single scroll authority. */
+    .view { display: grid; grid-template: 1fr / 1fr; width: 100%; height: 100%; background: #292d3e; overflow: auto; position: relative; }
+    .view > pre { box-sizing: border-box; grid-row: 1; grid-column: 1; margin: 0; padding: 8px; font: inherit; white-space: pre; overflow: visible; min-width: max-content; }
+    .view > pre.bg     { z-index: 0; pointer-events: none; color: transparent; }
+    .view > pre.layer  { pointer-events: none; color: transparent; background: transparent; }
+    .view > pre.main   { z-index: 10; outline: none; color: #ffffff; background: transparent; caret-color: #fffbe8; }
+    .view > pre.layer.red    { z-index: 1; } .view > pre.layer.red    span { background: rgba(255,  60,  60, .60) !important; }
+    .view > pre.layer.orange { z-index: 2; } .view > pre.layer.orange span { background: rgba(255, 150,  60, .60) !important; }
+    .view > pre.layer.yellow { z-index: 3; } .view > pre.layer.yellow span { background: rgba(255, 230,  90, .55) !important; }
+    .view > pre.layer.green  { z-index: 4; } .view > pre.layer.green  span { background: rgba(110, 230, 120, .55) !important; }
+    .view > pre.layer.blue   { z-index: 5; } .view > pre.layer.blue   span { background: rgba( 90, 170, 255, .60) !important; }
+    .view > pre.layer.indigo { z-index: 6; } .view > pre.layer.indigo span { background: rgba(140, 110, 230, .65) !important; }
+    .view > pre.layer.violet { z-index: 7; } .view > pre.layer.violet span { background: rgba(220, 130, 230, .60) !important; }
+
+    /* Data-column entries — each is just a styled <pre>. */
+    .data-section { margin: 0 0 .75rem 0; }
+    .data-section > h4 { margin: 0 0 .25rem 0; font: 11px/1.2 monospace; text-transform: uppercase; letter-spacing: .08em; }
+    .data-view {
+        display: block;
+        margin: 0 0 .35rem 0;
+        padding: .4rem .6rem;
+        background: #1f2233;
+        border-left: 4px solid transparent;
+        font: 13px/1.4 monospace;
+        white-space: pre;
+        overflow: auto;        /* horizontal + vertical scroll on the snippet itself */
+        max-height: 8rem;
+        color: #fff;
+        cursor: pointer;
+        user-select: none;
+    }
+    .data-view:hover  { background: #2a2f47; }
+    .data-view:focus  { outline: 2px solid currentColor; outline-offset: 1px; }
   </style>
 </head>
 <body>
   <div id="grid">
-    <div id="left"><div class="editor"><pre id="bg"></pre><pre class="layer red"    id="layer-red"></pre><pre class="layer orange" id="layer-orange"></pre><pre class="layer yellow" id="layer-yellow"></pre><pre class="layer green"  id="layer-green"></pre><pre class="layer blue"   id="layer-blue"></pre><pre class="layer indigo" id="layer-indigo"></pre><pre class="layer violet" id="layer-violet"></pre><pre id="editor" contenteditable="true" spellcheck="false"># Copyright (c) Facebook, Inc. and its affiliates. (http://www.facebook.com)
+    <div id="left"></div>
+    <div id="right"></div>
+    <div id="mouse-right"></div>
+  </div>
+  <pre id="default-source"># Copyright (c) Facebook, Inc. and its affiliates. (http://www.facebook.com)
 """
 main.py
 ============
@@ -680,10 +696,7 @@ if __name__ == "__main__":
     endTime = time.time()
     runtime = endTime - startTime
     print(runtime)
-</pre></div></div>
-    <div id="right"><pre id="info"></pre></div>
-    <div id="mouse-right"><pre id="mouse-info"></pre></div>
-  </div>
+</pre>
   <script type="module" src="./demo.js"></script>
 </body>
 </html>

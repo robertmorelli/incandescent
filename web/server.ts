@@ -36,20 +36,25 @@ function reflow(trees: ReturnType<typeof collect_trees>, id: number) {
     }
     const range_of = (i: number) => def_by_id.get(i);
     const tied_ids = b.tied_to_id.get(id) ?? [];
-    const self: { start: number; end: number }[] = [];
-    for (const i of [id, ...tied_ids]) { const r = range_of(i); if (r) self.push(r); }
-    const tied: { start: number; end: number }[] = [];
-    for (const i of tied_ids) { const r = range_of(i); if (r) tied.push(r); }
+    const seen = new Set<string>();
+    const linked: { start: number; end: number }[] = [];
+    for (const i of [id, ...tied_ids]) {
+        const r = range_of(i);
+        if (!r) continue;
+        const k = `${r.start}:${r.end}`;
+        if (seen.has(k)) continue;
+        seen.add(k);
+        linked.push(r);
+    }
     return {
         id,
         role:    b.role_by_id.get(id),
-        self,
+        linked,
         reads:   (b.reads_by_id.get(id)  ?? []).map(r => ({ start: r.start, end: r.end })),
         writes:  (b.writes_by_id.get(id) ?? []).map(r => ({ start: r.start, end: r.end })),
         args:     b.args_by_parameter_id.get(id)   ?? [],
         calls:    b.calls_by_function_id.get(id)   ?? [],
         returns:  b.returns_by_function_id.get(id) ?? [],
-        tied,
     };
 }
 
@@ -58,7 +63,9 @@ function info(trees: ReturnType<typeof collect_trees>, start: number, end: numbe
     const s = Math.min(start, end), e = Math.max(start, end);
     const spans: [number, number][] = point ? [[start, start + 1], [Math.max(0, start - 1), start]] : [[s, e]];
     const expr = best(trees.expression_types, spans);
-    const use = best(trees.identifier_uses, spans);
+    // If the click lies inside a type annotation, resolve to the *annotated* entity, not the type.
+    const annOwner = best(trees.annotation_owners, spans);
+    const use = annOwner ?? best(trees.identifier_uses, spans);
     const defId: number | undefined = use?.payload.definition?.id;
     return {
         range: point ? { cursor: start } : { start: s, end: e },

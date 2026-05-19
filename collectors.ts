@@ -3,9 +3,20 @@ import type { Analysis, Collector, DefinitionInfo, ParseNode, Range, Role } from
 import { CALLABLE_RETURN_RE, child, EMPTY_TYPES, NODE, node_kind, nodes, print_type, read_name } from './utility.ts';
 
 // Pyright DeclarationType numeric values. Pinned to current pyright version.
-const DT_VARIABLE  = 1;
-const DT_PARAMETER = 2;
-const DT_FUNCTION  = 5;
+const DT_VARIABLE       = 1;
+const DT_PARAMETER      = 2;
+const DT_TYPE_PARAMETER = 3;
+const DT_TYPE_ALIAS     = 4;
+const DT_FUNCTION       = 5;
+const DT_CLASS          = 6;
+const DT_ALIAS          = 8;
+
+// Decl types whose *defining name token* shouldn't be counted as a read or write
+// of the declared thing — the token IS the declaration, not an event on it.
+// (Variable is deliberately excluded: `x = 10` IS a write to x.)
+const DECL_NAME_NOT_USE = new Set([
+    DT_PARAMETER, DT_TYPE_PARAMETER, DT_TYPE_ALIAS, DT_FUNCTION, DT_CLASS, DT_ALIAS,
+]);
 
 const classes_cache = new WeakMap<Analysis, { node: ParseNode; type: any }[]>();
 
@@ -125,6 +136,28 @@ export function classify_role(decl: any): Role | undefined {
 
 // --- Read/write split ------------------------------------------------------
 
+// For a write use, return the range of the *assigned value* (rightExpr) — that's what the
+// write actually produces. Falls back to undefined for bare annotations / dels / for-targets.
+export function write_value_range(useNode: ParseNode): { start: number; end: number } | undefined {
+    const rangeOf = (n: any) => n ? { start: n.start, end: n.start + n.length } : undefined;
+    let cur: any = useNode;
+    while (cur) {
+        const parent: any = cur.parent;
+        if (!parent) return undefined;
+        const k = node_kind(parent);
+        if (k === 'Assignment' && parent.d?.leftExpr === cur) return rangeOf(parent.d?.rightExpr);
+        if (k === 'AugmentedAssignment' && (parent.d?.leftExpr === cur || parent.d?.destExpr === cur)) return rangeOf(parent.d?.rightExpr);
+        if (k === 'TypeAnnotation' && parent.d?.valueExpr === cur) {
+            const gp: any = parent.parent;
+            if (gp && node_kind(gp) === 'Assignment' && gp.d?.leftExpr === parent) return rangeOf(gp.d?.rightExpr);
+            return undefined;
+        }
+        if (k === 'Suite' || k === 'Module' || k === 'Function' || k === 'Class' || k === 'Lambda') return undefined;
+        cur = parent;
+    }
+    return undefined;
+}
+
 export function is_write_use(useNode: ParseNode): boolean {
     let cur: any = useNode;
     while (cur) {
@@ -144,7 +177,8 @@ export function is_write_use(useNode: ParseNode): boolean {
 
 // --- Call resolution + arg→param matching ---------------------------------
 
-// Returns the function/method decl node that the call resolves to, if any.
+// Returns the function/method decl that the call resolves to, if any. `Foo()` redirects to
+// Foo's `__init__` (walking the MRO); overloads — any one is fine.
 export function resolve_call_target(a: Analysis, callNode: ParseNode): any | undefined {
     const d: any = callNode.d;
     const left = d?.leftExpr;
@@ -154,18 +188,61 @@ export function resolve_call_target(a: Analysis, callNode: ParseNode): any | und
     try {
         const info = a.evaluator.getDeclInfoForNameNode?.(nameNode);
         const decls = info?.decls ?? [];
-        // Multiple overloads possible — any one is fine.
-        return decls.find((dd: any) => dd?.type === DT_FUNCTION);
+        const funcDecl = decls.find((dd: any) => dd?.type === DT_FUNCTION);
+        if (funcDecl) return funcDecl;
+        const classDecl = decls.find((dd: any) => dd?.type === DT_CLASS);
+        if (classDecl) {
+            const result = a.evaluator.getTypeOfClass?.(classDecl.node);
+            const ct = result?.classType;
+            const mro: any[] = ct?.shared?.mro ?? (ct ? [ct] : []);
+            for (const cls of mro) {
+                const sym = cls?.shared?.fields?.get?.('__init__');
+                if (!sym) continue;
+                const init = sym.getDeclarations?.()?.find((dd: any) => dd?.type === DT_FUNCTION);
+                if (init) return init;
+            }
+        }
+        return undefined;
     } catch {
         return undefined;
     }
+}
+
+function is_method(funcDeclNode: ParseNode): boolean {
+    let n: any = funcDeclNode;
+    while ((n = n?.parent)) {
+        const k = node_kind(n);
+        if (k === 'Class')    return true;
+        if (k === 'Function' || k === 'Lambda' || k === 'Module') return false;
+    }
+    return false;
+}
+
+// True when `useNode` sits at the call-target position of a Call expression.
+// Covers: the Call node itself, a Name as Call.leftExpr, a Name as MemberAccess.member of
+// (possibly nested) MemberAccess that's the leftExpr of a Call, and the MemberAccess(es)
+// themselves. Reads of `obj` in `obj.method()` still return false — they're real reads.
+export function is_call_site(useNode: ParseNode): boolean {
+    if (node_kind(useNode) === 'Call') return true;
+    let n: any = useNode;
+    while (n) {
+        const parent: any = n.parent;
+        if (!parent) return false;
+        const pk = node_kind(parent);
+        if (pk === 'Call' && parent.d?.leftExpr === n) return true;
+        if (pk === 'MemberAccess' && parent.d?.member === n) { n = parent; continue; }
+        return false;
+    }
+    return false;
 }
 
 // Match each argument expression to a parameter node. Positional → param[i]; keyword → param by name;
 // overflow into *args / **kwargs paramater when present.
 export function match_call_args(callNode: ParseNode, funcDeclNode: ParseNode): { paramNode: ParseNode; argExpr: ParseNode }[] {
     const callArgs: any[] = (callNode.d as any)?.args ?? [];
-    const params: any[] = (funcDeclNode.d as any)?.params ?? [];
+    const rawParams: any[] = (funcDeclNode.d as any)?.params ?? [];
+    // Methods bind `self`/`cls` implicitly — drop the first param when matching call args.
+    const params = is_method(funcDeclNode) && rawParams.length ? rawParams.slice(1) : rawParams;
     if (!params.length) return [];
 
     // Parameter.d.category: 0=Simple, 1=ArgsList(*args), 2=KwargsDict(**kwargs).
@@ -298,8 +375,18 @@ export type UsePayload = {
     name: string;
     type?: string;
     node: ParseNode;
-    mode: 'read' | 'write';
+    mode: 'read' | 'write' | 'decl' | 'call';
+    write_value_range?: { start: number; end: number };
 };
+
+// True when `useNode` is the very name token that declares `decl`, and `decl` is the kind
+// where that token isn't a read or write of the declared thing (function/class/parameter/etc.).
+function is_pure_decl_token(useNode: ParseNode, decl: any): boolean {
+    if (!decl || !DECL_NAME_NOT_USE.has(decl.type)) return false;
+    if (decl.node === useNode) return true;
+    const declNameNode = decl.node?.d?.name;
+    return declNameNode === useNode;
+}
 
 export function make_payloads(
     definitions: Map<object, DefinitionInfo>,
@@ -327,8 +414,17 @@ export function make_payloads(
             }
             const typ = pyright_type_with_recovery(a, target);
             if (typ && !definition.type) definition.type = typ;
-            const mode: 'read' | 'write' = is_write_use(target) ? 'write' : 'read';
-            return { definition, name: definition.name, type: typ, node: target, mode } as UsePayload;
+            const mode: 'read' | 'write' | 'decl' | 'call' =
+                is_pure_decl_token(target, info.decl) ? 'decl'
+                    : is_call_site(target) ? 'call'
+                    : is_write_use(target) ? 'write'
+                    : 'read';
+            const payload: UsePayload = { definition, name: definition.name, type: typ, node: target, mode };
+            if (mode === 'write') {
+                const rhs = write_value_range(target);
+                if (rhs) payload.write_value_range = rhs;
+            }
+            return payload;
         },
     };
 }

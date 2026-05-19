@@ -1,8 +1,8 @@
-// All DOM painting lives here. Nothing else writes innerHTML.
+// Pure markup helpers + color tables. DOM painting lives in view.js.
 
 export const RAINBOW = ['red', 'orange', 'yellow', 'green', 'blue', 'indigo', 'violet'];
 
-// Text colors only — backgrounds belong to the rainbow layers so they can show through.
+// Per-token foreground style; backgrounds belong to rainbow layers so they can show through.
 export const FG = {
     Name: 'color:#ffffff',
     Number: 'color:#fdffab',
@@ -54,22 +54,4 @@ export function syntaxMarks(highlights) {
     return highlights
         .map(h => ({ start: h.start, end: h.end, style: FG[h.payload.kind] }))
         .filter(m => m.style);
-}
-
-export function renderEditor(editor, source, highlights) {
-    editor.innerHTML = markup(source, syntaxMarks(highlights));
-}
-
-export function renderBg(bg, source, marks) {
-    bg.innerHTML = markup(source, marks.filter(Boolean));
-}
-
-// Rainbow layers: per-layer span background is set by CSS via `.layer.<name> span { ... !important }`,
-// so the inline style we pass through `markup` only needs to be non-empty (to emit a <span>).
-export function paintLayer(layer, source, marks) {
-    layer.innerHTML = markup(source, (marks ?? []).map(m => ({ start: m.start, end: m.end, style: 'background:transparent' })));
-}
-
-export function clearLayer(layer) {
-    layer.innerHTML = '';
 }

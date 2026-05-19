@@ -1,5 +1,5 @@
 import { getChildNodes } from './pyright/packages/pyright-internal/out/packages/pyright-internal/src/analyzer/parseTreeWalker.js';
-import type { Analysis, BackMaps, DefinitionInfo, NodeInfo, ParseNode } from './defs.ts';
+import type { Analysis, BackMaps, DefinitionInfo, NodeInfo, ParseNode, SegItem } from './defs.ts';
 import { classes, compute_ties, make_payloads, match_call_args, resolve_call_target, returns_in_function } from './collectors.ts';
 import type { Range, Role } from './defs.ts';
 import { create_session, type Session } from './init.ts';
@@ -27,6 +27,7 @@ export type TreeMap = {
     identifier_definitions: PrioritySegTree;
     identifier_uses: PrioritySegTree;
     lines: PrioritySegTree;
+    annotation_owners: PrioritySegTree;
     line_to_char_range: Map<number, { start: number; end: number }>;
     backmaps: BackMaps;
 };
@@ -101,10 +102,50 @@ function collect_from_analysis(a: Analysis): TreeMap {
     for (const r of identifier_uses.ranges_by_id.values()) {
         const id = r.payload.definition?.id;
         if (id === undefined) continue;
-        const target = (r.payload as any).mode === 'write' ? writes_by_id : reads_by_id;
-        const list = target.get(id);
-        if (list) list.push(r); else target.set(id, [r]);
+        const mode = (r.payload as any).mode;
+        if (mode === 'decl' || mode === 'call') continue;   // not reads or writes
+        if (mode === 'write') {
+            // Show the assigned VALUE (rightExpr), not the variable name on the LHS.
+            const rhs = (r.payload as any).write_value_range;
+            const synthetic = rhs ? { ...r, start: rhs.start, end: rhs.end } : r;
+            const list = writes_by_id.get(id);
+            if (list) list.push(synthetic); else writes_by_id.set(id, [synthetic]);
+        } else {
+            const list = reads_by_id.get(id);
+            if (list) list.push(r); else reads_by_id.set(id, [r]);
+        }
     }
+
+    // Annotation owners: every typed location (Parameter.annotation, Function.returnAnnotation,
+    // TypeAnnotation on an assignment) → SegItem whose payload.definition is the *annotated*
+    // entity (parameter, function, variable), not whatever class/type the annotation expression
+    // resolves to. Lets a click on `: int` reflow on the parameter, not on `int`.
+    const annotation_segs: SegItem[] = [];
+    const owner_id_from_name_node = (nameNode: any): DefinitionInfo | undefined => {
+        if (!nameNode) return undefined;
+        try {
+            const info = a.evaluator.getDeclInfoForNameNode?.(nameNode);
+            const decl = info?.decls?.[0];
+            return decl ? definitions.get(decl) : undefined;
+        } catch { return undefined; }
+    };
+    for (const { node } of nodes(a.root)) {
+        const k = node_kind(node);
+        const d: any = (node as any).d;
+        let ann: any, ownerNameNode: any;
+        if      (k === 'Function')       { ann = d?.returnAnnotation; ownerNameNode = d?.name; }
+        else if (k === 'Parameter')      { ann = d?.annotation;       ownerNameNode = d?.name; }
+        else if (k === 'TypeAnnotation') { ann = d?.annotation;       ownerNameNode = d?.valueExpr; }
+        if (!ann || !ownerNameNode) continue;
+        const owner = owner_id_from_name_node(ownerNameNode);
+        if (!owner) continue;
+        annotation_segs.push({
+            start: ann.start, end: ann.start + ann.length, height: 0,
+            payload: { definition: owner, name: owner.name, node: ann },
+            id: annotation_segs.length,
+        });
+    }
+    const annotation_owners = new PrioritySegTree(annotation_segs);
 
     // Ensure classes are cached before computing ties (already used by recovery).
     void classes(a);
@@ -125,17 +166,30 @@ function collect_from_analysis(a: Analysis): TreeMap {
         }
         for (const x of cls) class_of.set(x, cls);
     }
-    const reflow_list = <V>(raw: Map<number, V[]>): Map<number, V[]> => {
+    // Dedup ranges by (start,end). Different list entries that map to the same source span are
+    // visually identical and shouldn't appear twice in the data column.
+    const dedup_by_range = <V extends { start: number; end: number }>(arr: V[]): V[] => {
+        const seen = new Set<string>();
+        const out: V[] = [];
+        for (const v of arr) {
+            const k = `${v.start}:${v.end}`;
+            if (seen.has(k)) continue;
+            seen.add(k);
+            out.push(v);
+        }
+        return out;
+    };
+    const reflow_list = <V extends { start: number; end: number }>(raw: Map<number, V[]>): Map<number, V[]> => {
         const out = new Map<number, V[]>();
         const seen_class = new WeakSet<Set<number>>();
         const merge = (cls: Set<number>) => {
             const m: V[] = [];
             for (const i of cls) for (const v of raw.get(i) ?? []) m.push(v);
-            return m;
+            return dedup_by_range(m);
         };
         for (const id of raw.keys()) {
             const cls = class_of.get(id);
-            if (!cls) { out.set(id, raw.get(id)!); continue; }
+            if (!cls) { out.set(id, dedup_by_range(raw.get(id)!)); continue; }
             if (seen_class.has(cls)) continue;
             seen_class.add(cls);
             const merged = merge(cls);
@@ -156,6 +210,7 @@ function collect_from_analysis(a: Analysis): TreeMap {
         identifier_definitions,
         identifier_uses,
         lines,
+        annotation_owners,
         line_to_char_range,
         backmaps: {
             uses_by_definition_id: group_ranges(identifier_uses, r => r.payload.definition?.id),
