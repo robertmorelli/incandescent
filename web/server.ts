@@ -44,6 +44,7 @@ function info(trees: ReturnType<typeof collect_trees>, start: number, end: numbe
 
 Bun.serve<SocketData>({
     port,
+    hostname: process.env.HOST ?? '127.0.0.1',
     async fetch(req, server) {
         const url = new URL(req.url);
 

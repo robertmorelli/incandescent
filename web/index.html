@@ -9,9 +9,17 @@
     #left, #right, #mouse-right { min-width: 0; min-height: 0; overflow: hidden; }
     #right, #mouse-right { border-left: 1px solid #404661; }
     .editor { position: relative; width: 100%; height: 100%; font: 14px/1.3 monospace; background: #292d3e; }
-    #bg, #editor { box-sizing: border-box; position: absolute; inset: 0; margin: 0; padding: 8px; width: 100%; height: 100%; font: inherit; white-space: pre; overflow: auto; }
+    #bg, #editor, .layer { box-sizing: border-box; position: absolute; inset: 0; margin: 0; padding: 8px; width: 100%; height: 100%; font: inherit; white-space: pre; overflow: auto; }
     #bg { z-index: 0; pointer-events: none; color: transparent; background: #292d3e; }
-    #editor { z-index: 1; outline: none; color: #ffffff; background: transparent; caret-color: #fffbe8; }
+    .layer { pointer-events: none; color: transparent; background: transparent; overflow: hidden; }
+    .layer.red    { z-index: 1; } .layer.red    span { background: rgba(255,  60,  60, .60) !important; }
+    .layer.orange { z-index: 2; } .layer.orange span { background: rgba(255, 150,  60, .60) !important; }
+    .layer.yellow { z-index: 3; } .layer.yellow span { background: rgba(255, 230,  90, .55) !important; }
+    .layer.green  { z-index: 4; } .layer.green  span { background: rgba(110, 230, 120, .55) !important; }
+    .layer.blue   { z-index: 5; } .layer.blue   span { background: rgba( 90, 170, 255, .60) !important; }
+    .layer.indigo { z-index: 6; } .layer.indigo span { background: rgba(140, 110, 230, .65) !important; }
+    .layer.violet { z-index: 7; } .layer.violet span { background: rgba(220, 130, 230, .60) !important; }
+    #editor { z-index: 10; outline: none; color: #ffffff; background: transparent; caret-color: #fffbe8; }
     #info, #mouse-info { box-sizing: border-box; margin: 0; padding: 8px; width: 100%; height: 100%; overflow: auto; font: 14px/1.3 monospace; white-space: pre-wrap; color: #ffffff; background: #292d3e; }
     #editor .Name { color: #ffffff; } #editor .Number { color: #fdffab; } #editor .String,#editor .StringList { color: #c8ffa7; background: #374048; }
     #editor .Call,#editor .Function { color: #9ce7ff; } #editor .MemberAccess { color: #ffffff; } #editor .Operator { color: #ffaff3; }
@@ -28,7 +36,7 @@
 </head>
 <body>
   <div id="grid">
-    <div id="left"><div class="editor"><pre id="bg"></pre><pre id="editor" contenteditable="true" spellcheck="false"># Copyright (c) Facebook, Inc. and its affiliates. (http://www.facebook.com)
+    <div id="left"><div class="editor"><pre id="bg"></pre><pre class="layer red"    id="layer-red"></pre><pre class="layer orange" id="layer-orange"></pre><pre class="layer yellow" id="layer-yellow"></pre><pre class="layer green"  id="layer-green"></pre><pre class="layer blue"   id="layer-blue"></pre><pre class="layer indigo" id="layer-indigo"></pre><pre class="layer violet" id="layer-violet"></pre><pre id="editor" contenteditable="true" spellcheck="false"># Copyright (c) Facebook, Inc. and its affiliates. (http://www.facebook.com)
 """
 main.py
 ============

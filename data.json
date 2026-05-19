@@ -1,0 +1,82 @@
+{
+    "NODE": {
+        "Function":     { "highlightChild": "name" },
+        "Class":        { "highlightChild": "name", "isClass": true },
+        "Call":         { "isExpression": true, "isUse": true, "highlightChild": "leftExpr", "nameChild": "leftExpr" },
+        "MemberAccess": { "isExpression": true, "isUse": true, "highlightChild": "member",   "nameChild": "member", "baseChild": "leftExpr" },
+        "Name":         { "isExpression": true, "isUse": true },
+
+        "AssignmentExpression": { "isExpression": true },
+        "Await":                { "isExpression": true },
+        "BinaryOperation":      { "isExpression": true },
+        "Comprehension":        { "isExpression": true },
+        "Constant":             { "isExpression": true },
+        "Dictionary":           { "isExpression": true },
+        "DictionaryExpandEntry":{ "isExpression": true },
+        "DictionaryKeyEntry":   { "isExpression": true },
+        "Ellipsis":             { "isExpression": true },
+        "Error":                { "isExpression": true },
+        "FormatString":         { "isExpression": true },
+        "Index":                { "isExpression": true },
+        "Lambda":               { "isExpression": true },
+        "List":                 { "isExpression": true },
+        "ModuleName":           { "isExpression": true },
+        "Number":               { "isExpression": true },
+        "Set":                  { "isExpression": true },
+        "Slice":                { "isExpression": true },
+        "String":               { "isExpression": true },
+        "StringList":           { "isExpression": true },
+        "Ternary":              { "isExpression": true },
+        "Tuple":                { "isExpression": true },
+        "UnaryOperation":       { "isExpression": true },
+        "Unpack":               { "isExpression": true },
+        "Yield":                { "isExpression": true },
+        "YieldFrom":            { "isExpression": true },
+        "Assignment":           { "isExpression": true },
+        "TypeAnnotation":       { "isExpression": true },
+        "Parameter":            { "isExpression": true }
+    },
+
+    "TOKEN_KIND": {
+        "5": "String", "24": "String", "25": "String", "26": "String",
+        "6": "Number",
+        "7": "Name",
+        "8": "__keyword__",
+        "9": "Operator", "10": "Operator", "11": "Operator", "12": "Operator", "13": "Operator",
+        "14": "Operator", "15": "Operator", "16": "Operator", "17": "Operator", "18": "Operator",
+        "19": "Operator", "20": "Operator", "21": "Operator", "23": "Operator"
+    },
+
+    "KEYWORD_KIND": {
+        "7": "keyword", "10": "keyword", "18": "keyword", "21": "keyword", "1": "keyword",
+        "12": "control", "13": "control", "17": "control", "34": "control", "36": "control",
+        "27": "control", "0": "control", "29": "control", "28": "control", "22": "control",
+        "19": "control", "39": "control", "37": "control",
+        "15": "builtin", "16": "builtin", "26": "builtin", "33": "builtin", "14": "builtin"
+    },
+
+    "COLLECTORS": {
+        "highlights":       { "key": "highlightChild", "height_base": 100 },
+        "expression_types": { "key": "isExpression" },
+        "identifier_uses":  { "key": "isUse" }
+    },
+
+    "TOKEN_HEIGHTS": { "comment": 10, "main": 20 },
+
+    "PRINT_OPTS": { "enforcePythonSyntax": true, "printUnknownWithAny": true, "omitTypeArgsIfUnknown": false },
+
+    "EMPTY_TYPES": ["Any", "Unknown"],
+
+    "CALLABLE_RETURN_PATTERN": "^Callable\\[(?:\\.\\.\\.|\\[[^\\]]*\\]),\\s*(.*)\\]$",
+
+    "PYRIGHT": {
+        "analyzer_name":          "incandescent",
+        "input_filename":         "__incandescent_input.py",
+        "analyze_loop_guard":     1000,
+        "typeshed_path":          "pyright/packages/pyright-internal/typeshed-fallback",
+        "stub_path":              "stubs",
+        "extra_paths":            ["stubs"],
+        "useLibraryCodeForTypes": true,
+        "indexing":               true
+    }
+}
