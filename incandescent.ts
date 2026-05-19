@@ -135,7 +135,12 @@ function collect_from_analysis(a: Analysis): TreeMap {
         let ann: any, ownerNameNode: any;
         if      (k === 'Function')       { ann = d?.returnAnnotation; ownerNameNode = d?.name; }
         else if (k === 'Parameter')      { ann = d?.annotation;       ownerNameNode = d?.name; }
-        else if (k === 'TypeAnnotation') { ann = d?.annotation;       ownerNameNode = d?.valueExpr; }
+        else if (k === 'TypeAnnotation') {
+            ann = d?.annotation;
+            const ve: any = d?.valueExpr;
+            // For `self.x: T = ...` the valueExpr is a MemberAccess; resolve via its .member name.
+            ownerNameNode = ve && node_kind(ve) === 'MemberAccess' ? ve.d?.member : ve;
+        }
         if (!ann || !ownerNameNode) continue;
         const owner = owner_id_from_name_node(ownerNameNode);
         if (!owner) continue;

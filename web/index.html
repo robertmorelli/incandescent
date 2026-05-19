@@ -36,14 +36,17 @@
         border-left: 4px solid transparent;
         font: 13px/1.4 monospace;
         white-space: pre;
-        overflow: auto;        /* horizontal + vertical scroll on the snippet itself */
-        max-height: 8rem;
+        overflow-x: auto;        /* horizontal scroll only — natural height */
+        overflow-y: hidden;
         color: #fff;
         cursor: pointer;
         user-select: none;
     }
     .data-view:hover  { background: #2a2f47; }
     .data-view:focus  { outline: 2px solid currentColor; outline-offset: 1px; }
+    .data-view::-webkit-scrollbar         { height: 6px; }
+    .data-view::-webkit-scrollbar-thumb   { background: rgba(255,255,255,.15); border-radius: 3px; }
+    .data-view::-webkit-scrollbar-track   { background: transparent; }
   </style>
 </head>
 <body>

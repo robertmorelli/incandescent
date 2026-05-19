@@ -322,6 +322,7 @@ export function compute_ties(a: Analysis, def_by_decl: Map<object, DefinitionInf
         const myFields = c.type?.shared?.fields;
         if (!myFields) continue;
         for (const [name, sym] of myFields.entries() as Iterable<[string, any]>) {
+            if (name === '__init__') continue;   // constructors aren't tied across the hierarchy
             const myDecls = sym?.getDeclarations?.() ?? [];
             for (const myDecl of myDecls) {
                 const myDef = def_by_decl.get(myDecl);
@@ -379,6 +380,14 @@ export type UsePayload = {
     write_value_range?: { start: number; end: number };
 };
 
+// A Name that is the `.member` of a MemberAccess is redundant — the MemberAccess itself
+// already records the use with the same definition.
+function is_redundant_member_name(useNode: ParseNode): boolean {
+    if (node_kind(useNode) !== 'Name') return false;
+    const parent: any = (useNode as any).parent;
+    return !!parent && node_kind(parent) === 'MemberAccess' && parent.d?.member === useNode;
+}
+
 // True when `useNode` is the very name token that declares `decl`, and `decl` is the kind
 // where that token isn't a read or write of the declared thing (function/class/parameter/etc.).
 function is_pure_decl_token(useNode: ParseNode, decl: any): boolean {
@@ -403,6 +412,7 @@ export function make_payloads(
         },
 
         identifier_uses: (_node, target, a) => {
+            if (is_redundant_member_name(target)) return undefined;
             const info = pyright_decl(a, target);
             if (!info) return undefined;
             let definition = definitions.get(info.decl);

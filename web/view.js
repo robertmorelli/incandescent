@@ -102,13 +102,31 @@ export function createView(opts) {
     function repaintLayer(name) {
         if (!layers[name]) return;
         const ms = translate(layerMarks[name].map(m => ({ start: m.start, end: m.end, style: 'background:transparent' })));
-        layers[name].innerHTML = markup(displaySource, ms);
+        // Layer content is just position-padding: space everywhere, block char at highlighted
+        // positions, newlines preserved. Same column count as the source, so it aligns under the
+        // editor. We don't duplicate the source text in every layer.
+        const buf = new Array(displaySource.length);
+        for (let i = 0; i < displaySource.length; i++) buf[i] = displaySource[i] === '\n' ? '\n' : ' ';
+        for (const m of ms) {
+            for (let i = m.start; i < Math.min(displaySource.length, m.end); i++) {
+                if (buf[i] !== '\n') buf[i] = '█';
+            }
+        }
+        layers[name].innerHTML = markup(buf.join(''), ms);
     }
 
     function repaintBg() {
         if (!bg) return;
         const ms = translate(bgMarks);
-        bg.innerHTML = markup(displaySource, ms);
+        // Same position-padding trick as layers — bg never duplicates the source text.
+        const buf = new Array(displaySource.length);
+        for (let i = 0; i < displaySource.length; i++) buf[i] = displaySource[i] === '\n' ? '\n' : ' ';
+        for (const m of ms) {
+            for (let i = m.start; i < Math.min(displaySource.length, m.end); i++) {
+                if (buf[i] !== '\n') buf[i] = '█';
+            }
+        }
+        bg.innerHTML = markup(buf.join(''), ms);
     }
 
     return {
