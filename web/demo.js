@@ -46,6 +46,7 @@ function handleMessage(msg) {
             info.innerText = JSON.stringify(data, null, 2);
             cursorExpr = msg.data.expression_range;
             cursorFound = msg.data.found_range;
+            applyReflow(msg.data.reflow);
         }
         paintOverlays();
     }
@@ -84,6 +85,32 @@ globalThis.paintLayer     = (name, marks) => layers[name] && paintLayer(layers[n
 globalThis.clearLayer     = name          => layers[name] && clearLayer(layers[name]);
 globalThis.clearAllLayers = ()            => { for (const n of RAINBOW) clearLayer(layers[n]); };
 globalThis.RAINBOW        = RAINBOW;
+
+// Sequential color assignment for the reflow tables.
+//   red    = self / active annotation
+//   orange = reads
+//   yellow = writes
+//   green  = args bound to this param
+//   blue   = calls of this function
+//   indigo = returned expressions
+//   violet = tied annotations (overrides across MRO)
+const REFLOW_LAYERS = {
+    self:    'red',
+    reads:   'orange',
+    writes:  'yellow',
+    args:    'green',
+    calls:   'blue',
+    returns: 'indigo',
+    tied:    'violet',
+};
+
+function applyReflow(reflow) {
+    if (!reflow) { globalThis.clearAllLayers(); return; }
+    for (const [key, color] of Object.entries(REFLOW_LAYERS)) {
+        const marks = reflow[key] ?? [];
+        paintLayer(layers[color], source(), marks);
+    }
+}
 
 editor.addEventListener('input',     analyze);
 editor.addEventListener('keyup',     showCursor);

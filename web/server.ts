@@ -26,12 +26,40 @@ function best(tree: any, spans: [number, number][]) {
         .sort((a: any, b: any) => b.height - a.height)[0];
 }
 
+function reflow(trees: ReturnType<typeof collect_trees>, id: number) {
+    // Tables are pre-reflowed: a lookup by any id already yields the whole tie-class's contents.
+    const b = trees.backmaps;
+    const def_by_id = new Map<number, { start: number; end: number }>();
+    for (const r of trees.identifier_definitions.ranges_by_id.values()) {
+        const d: any = r.payload.definition;
+        if (d) def_by_id.set(d.id, { start: r.start, end: r.end });
+    }
+    const range_of = (i: number) => def_by_id.get(i);
+    const tied_ids = b.tied_to_id.get(id) ?? [];
+    const self: { start: number; end: number }[] = [];
+    for (const i of [id, ...tied_ids]) { const r = range_of(i); if (r) self.push(r); }
+    const tied: { start: number; end: number }[] = [];
+    for (const i of tied_ids) { const r = range_of(i); if (r) tied.push(r); }
+    return {
+        id,
+        role:    b.role_by_id.get(id),
+        self,
+        reads:   (b.reads_by_id.get(id)  ?? []).map(r => ({ start: r.start, end: r.end })),
+        writes:  (b.writes_by_id.get(id) ?? []).map(r => ({ start: r.start, end: r.end })),
+        args:     b.args_by_parameter_id.get(id)   ?? [],
+        calls:    b.calls_by_function_id.get(id)   ?? [],
+        returns:  b.returns_by_function_id.get(id) ?? [],
+        tied,
+    };
+}
+
 function info(trees: ReturnType<typeof collect_trees>, start: number, end: number) {
     const point = start === end;
     const s = Math.min(start, end), e = Math.max(start, end);
     const spans: [number, number][] = point ? [[start, start + 1], [Math.max(0, start - 1), start]] : [[s, e]];
     const expr = best(trees.expression_types, spans);
     const use = best(trees.identifier_uses, spans);
+    const defId: number | undefined = use?.payload.definition?.id;
     return {
         range: point ? { cursor: start } : { start: s, end: e },
         line: trees.lines.query_max(start, point ? start + 1 : end)?.payload.name,
@@ -39,6 +67,7 @@ function info(trees: ReturnType<typeof collect_trees>, start: number, end: numbe
         definition: use?.payload.definition,
         expression_range: expr ? { start: expr.start, end: expr.end } : undefined,
         found_range: use?.payload.definition ? { start: use.payload.definition.start, end: use.payload.definition.end } : undefined,
+        reflow: defId !== undefined ? reflow(trees, defId) : undefined,
     };
 }
 

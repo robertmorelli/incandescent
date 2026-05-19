@@ -1,6 +1,7 @@
 import { getChildNodes } from './pyright/packages/pyright-internal/out/packages/pyright-internal/src/analyzer/parseTreeWalker.js';
 import type { Analysis, BackMaps, DefinitionInfo, NodeInfo, ParseNode } from './defs.ts';
-import { make_payloads } from './collectors.ts';
+import { classes, compute_ties, make_payloads, match_call_args, resolve_call_target, returns_in_function } from './collectors.ts';
+import type { Range, Role } from './defs.ts';
 import { create_session, type Session } from './init.ts';
 import {
     build_collectors,
@@ -32,9 +33,11 @@ export type TreeMap = {
 
 function collect_from_analysis(a: Analysis): TreeMap {
     const definitions = new Map<object, DefinitionInfo>();
+    const decl_id_by_decl = (d: object) => definitions.get(d)?.id;
+    const roles = new Map<number, Role>();
     const line_list = [...line_items(a)];
 
-    const collectors = build_collectors(make_payloads(definitions));
+    const collectors = build_collectors(make_payloads(definitions, roles));
     const emit_map: Record<string, ReturnType<typeof emit_collector>> = {};
     for (const [k, c] of Object.entries(collectors)) emit_map[k] = emit_collector(a, c);
     const ast = stream(nodes(a.root), emit_map);
@@ -50,6 +53,103 @@ function collect_from_analysis(a: Analysis): TreeMap {
     const lines = tree(line_segs);
     const line_to_char_range = new Map(line_list.map(l => [l.line, { start: l.start, end: l.end }]));
 
+    // ---- new tables ----
+    const args_by_parameter_id   = new Map<number, Range[]>();
+    const calls_by_function_id   = new Map<number, Range[]>();
+    const returns_by_function_id = new Map<number, Range[]>();
+
+    const push_range = (m: Map<number, Range[]>, id: number, r: Range) => {
+        const list = m.get(id);
+        if (list) list.push(r); else m.set(id, [r]);
+    };
+
+    // Walk every Call node, resolve target, push call site + arg→param entries.
+    for (const { node } of nodes(a.root)) {
+        if (node_kind(node) !== 'Call') continue;
+        const targetDecl = resolve_call_target(a, node);
+        if (!targetDecl) continue;
+        const funcId = decl_id_by_decl(targetDecl);
+        if (funcId === undefined) continue;
+        push_range(calls_by_function_id, funcId, { start: node.start, end: node.start + node.length });
+        const matches = match_call_args(node, targetDecl.node);
+        for (const m of matches) {
+            const paramDecl = (() => {
+                const nameNode = (m.paramNode as any)?.d?.name;
+                if (!nameNode) return undefined;
+                try { return a.evaluator.getDeclInfoForNameNode?.(nameNode)?.decls?.[0]; }
+                catch { return undefined; }
+            })();
+            const paramId = paramDecl ? decl_id_by_decl(paramDecl) : undefined;
+            if (paramId === undefined) continue;
+            push_range(args_by_parameter_id, paramId, { start: m.argExpr.start, end: m.argExpr.start + m.argExpr.length });
+        }
+    }
+
+    // For each Function decl we have an id for, walk its body for Return expressions.
+    for (const [declObj, def] of definitions) {
+        if ((declObj as any)?.type !== 5 /* Function */) continue;
+        const fnNode = (declObj as any)?.node;
+        if (!fnNode) continue;
+        const rets = returns_in_function(fnNode);
+        if (!rets.length) continue;
+        returns_by_function_id.set(def.id, rets.map(r => ({ start: r.start, end: r.start + r.length })));
+    }
+
+    // Reads / writes split.
+    const reads_by_id  = new Map<number, ReturnType<typeof group_ranges>['get'] extends any ? any : never>() as Map<number, any[]>;
+    const writes_by_id = new Map<number, any[]>();
+    for (const r of identifier_uses.ranges_by_id.values()) {
+        const id = r.payload.definition?.id;
+        if (id === undefined) continue;
+        const target = (r.payload as any).mode === 'write' ? writes_by_id : reads_by_id;
+        const list = target.get(id);
+        if (list) list.push(r); else target.set(id, [r]);
+    }
+
+    // Ensure classes are cached before computing ties (already used by recovery).
+    void classes(a);
+    const direct_ties = compute_ties(a, definitions);
+
+    // Tie-equivalence classes: transitively close `direct_ties` so a member of the same
+    // override chain shares one Set. Used to reflow every id-keyed table below.
+    const class_of = new Map<number, Set<number>>();
+    for (const seed of direct_ties.keys()) {
+        if (class_of.has(seed)) continue;
+        const cls = new Set<number>();
+        const queue = [seed];
+        while (queue.length) {
+            const x = queue.shift()!;
+            if (cls.has(x)) continue;
+            cls.add(x);
+            for (const y of direct_ties.get(x) ?? []) if (!cls.has(y)) queue.push(y);
+        }
+        for (const x of cls) class_of.set(x, cls);
+    }
+    const reflow_list = <V>(raw: Map<number, V[]>): Map<number, V[]> => {
+        const out = new Map<number, V[]>();
+        const seen_class = new WeakSet<Set<number>>();
+        const merge = (cls: Set<number>) => {
+            const m: V[] = [];
+            for (const i of cls) for (const v of raw.get(i) ?? []) m.push(v);
+            return m;
+        };
+        for (const id of raw.keys()) {
+            const cls = class_of.get(id);
+            if (!cls) { out.set(id, raw.get(id)!); continue; }
+            if (seen_class.has(cls)) continue;
+            seen_class.add(cls);
+            const merged = merge(cls);
+            for (const i of cls) if (merged.length) out.set(i, merged);
+        }
+        // Classes whose members had no raw entries are simply absent — same as raw.
+        return out;
+    };
+    const tied_to_id = new Map<number, number[]>();
+    for (const [id, cls] of class_of) {
+        const others = [...cls].filter(x => x !== id);
+        if (others.length) tied_to_id.set(id, others);
+    }
+
     return {
         highlights,
         expression_types,
@@ -59,8 +159,14 @@ function collect_from_analysis(a: Analysis): TreeMap {
         line_to_char_range,
         backmaps: {
             uses_by_definition_id: group_ranges(identifier_uses, r => r.payload.definition?.id),
-            args_by_parameter_id: new Map(),
             expressions_by_type: group_ranges(expression_types, r => r.payload.type),
+            role_by_id: roles,
+            reads_by_id:            reflow_list(reads_by_id),
+            writes_by_id:           reflow_list(writes_by_id),
+            args_by_parameter_id:   reflow_list(args_by_parameter_id),
+            calls_by_function_id:   reflow_list(calls_by_function_id),
+            returns_by_function_id: reflow_list(returns_by_function_id),
+            tied_to_id,
         },
     };
 }
