@@ -1,6 +1,6 @@
 import { getChildNodes } from './pyright/packages/pyright-internal/out/packages/pyright-internal/src/analyzer/parseTreeWalker.js';
 import type { Analysis, BackMaps, DefinitionInfo, NodeInfo, ParseNode, SegItem } from './defs.ts';
-import { classes, compute_ties, make_payloads, match_call_args, resolve_call_target, returns_in_function } from './collectors.ts';
+import { BUILTIN_DUNDERS, classes, compute_ties, find_dunder_decl, implicit_dunder_dispatches, is_method, make_payloads, match_call_args, resolve_call_target, returns_in_function } from './collectors.ts';
 import type { Range, Role } from './defs.ts';
 import { create_session, type Session } from './init.ts';
 import {
@@ -64,25 +64,68 @@ function collect_from_analysis(a: Analysis): TreeMap {
         if (list) list.push(r); else m.set(id, [r]);
     };
 
-    // Walk every Call node, resolve target, push call site + arg→param entries.
-    for (const { node } of nodes(a.root)) {
-        if (node_kind(node) !== 'Call') continue;
-        const targetDecl = resolve_call_target(a, node);
-        if (!targetDecl) continue;
-        const funcId = decl_id_by_decl(targetDecl);
-        if (funcId === undefined) continue;
-        push_range(calls_by_function_id, funcId, { start: node.start, end: node.start + node.length });
-        const matches = match_call_args(node, targetDecl.node);
-        for (const m of matches) {
-            const paramDecl = (() => {
-                const nameNode = (m.paramNode as any)?.d?.name;
-                if (!nameNode) return undefined;
-                try { return a.evaluator.getDeclInfoForNameNode?.(nameNode)?.decls?.[0]; }
-                catch { return undefined; }
-            })();
+    const decl_for_param_name_node = (nameNode: any): any | undefined => {
+        if (!nameNode) return undefined;
+        try { return a.evaluator.getDeclInfoForNameNode?.(nameNode)?.decls?.[0]; }
+        catch { return undefined; }
+    };
+    const record_call = (funcId: number, callNode: ParseNode, params: any[], argExprs: ParseNode[]) => {
+        push_range(calls_by_function_id, funcId, { start: callNode.start, end: callNode.start + callNode.length });
+        for (let i = 0; i < argExprs.length && i < params.length; i++) {
+            const ae = argExprs[i]; if (!ae) continue;
+            const paramDecl = decl_for_param_name_node((params[i] as any)?.d?.name);
             const paramId = paramDecl ? decl_id_by_decl(paramDecl) : undefined;
             if (paramId === undefined) continue;
-            push_range(args_by_parameter_id, paramId, { start: m.argExpr.start, end: m.argExpr.start + m.argExpr.length });
+            push_range(args_by_parameter_id, paramId, { start: ae.start, end: ae.start + ae.length });
+        }
+    };
+
+    // Walk the AST once. For each node:
+    //   - If it's a Call: handle explicit function/method calls + len(x)/iter(x)/etc. builtin dispatch.
+    //   - For everything else: ask the generic dispatcher whether the node implicitly invokes any
+    //     dunder methods (Index, BinaryOperation, UnaryOperation, AugmentedAssignment, For, Await, With).
+    //     Pyright's getBoundMagicMethod does the actual method lookup.
+    for (const { node } of nodes(a.root)) {
+        const k = node_kind(node);
+        const d: any = (node as any).d;
+
+        if (k === 'Call') {
+            const targetDecl = resolve_call_target(a, node);
+            if (targetDecl) {
+                const funcId = decl_id_by_decl(targetDecl);
+                if (funcId !== undefined) {
+                    push_range(calls_by_function_id, funcId, { start: node.start, end: node.start + node.length });
+                    for (const m of match_call_args(node, targetDecl.node)) {
+                        const paramDecl = decl_for_param_name_node((m.paramNode as any)?.d?.name);
+                        const paramId = paramDecl ? decl_id_by_decl(paramDecl) : undefined;
+                        if (paramId === undefined) continue;
+                        push_range(args_by_parameter_id, paramId, { start: m.argExpr.start, end: m.argExpr.start + m.argExpr.length });
+                    }
+                }
+            }
+            // len(x) / iter(x) / etc. — also record as a call of x's dunder.
+            const left = d?.leftExpr;
+            const builtin = left && node_kind(left) === 'Name' ? (left.d as any)?.value : undefined;
+            const dunderName = builtin ? BUILTIN_DUNDERS.get(builtin) : undefined;
+            if (dunderName) {
+                const firstArg = d?.args?.[0]?.d?.valueExpr;
+                if (firstArg) {
+                    const dunderDecl = find_dunder_decl(a, firstArg, dunderName);
+                    const dunderId = dunderDecl ? decl_id_by_decl(dunderDecl) : undefined;
+                    if (dunderId !== undefined) push_range(calls_by_function_id, dunderId, { start: node.start, end: node.start + node.length });
+                }
+            }
+            continue;
+        }
+
+        for (const disp of implicit_dunder_dispatches(node)) {
+            const dunderDecl = find_dunder_decl(a, disp.self, disp.method);
+            if (!dunderDecl) continue;
+            const funcId = decl_id_by_decl(dunderDecl);
+            if (funcId === undefined) continue;
+            const rawParams = (dunderDecl.node?.d as any)?.params ?? [];
+            const params = is_method(dunderDecl.node) ? rawParams.slice(1) : rawParams;
+            record_call(funcId, disp.callRange, params, disp.args);
         }
     }
 

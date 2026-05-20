@@ -208,7 +208,73 @@ export function resolve_call_target(a: Analysis, callNode: ParseNode): any | und
     }
 }
 
-function is_method(funcDeclNode: ParseNode): boolean {
+import { AUGMENTED_OPERATORS, BINARY_OPERATORS, BUILTIN_DUNDERS_MAP, UNARY_OPERATORS } from './utility.ts';
+
+export const BUILTIN_DUNDERS = BUILTIN_DUNDERS_MAP;
+
+// Use pyright's own bound-method resolver — it walks the MRO + handles overloads + descriptors.
+export function find_dunder_decl(a: Analysis, expr: ParseNode, name: string): any | undefined {
+    try {
+        const t = a.evaluator.getTypeOfExpression?.(expr);
+        const ct = t?.type;
+        if (!ct) return undefined;
+        const bound = a.evaluator.getBoundMagicMethod?.(ct, name);
+        const decl = bound?.shared?.declaration;
+        return decl?.type === DT_FUNCTION ? decl : undefined;
+    } catch {
+        return undefined;
+    }
+}
+
+// One generic dispatcher: returns the implicit method calls a node makes, if any.
+// Covers Index, BinaryOperation, UnaryOperation, AugmentedAssignment, For, Await, With.
+// Direct Call nodes are handled separately via resolve_call_target.
+export type DunderDispatch = {
+    method: string;
+    self: ParseNode;
+    args: ParseNode[];
+    callRange: ParseNode;
+};
+export function implicit_dunder_dispatches(node: ParseNode): DunderDispatch[] {
+    const k = node_kind(node);
+    const d: any = (node as any).d;
+    if (!d) return [];
+
+    if (k === 'BinaryOperation') {
+        const m = BINARY_OPERATORS[d.operator];
+        return m ? [{ method: m, self: d.leftExpr, args: [d.rightExpr].filter(Boolean), callRange: node }] : [];
+    }
+    if (k === 'UnaryOperation') {
+        const m = UNARY_OPERATORS[d.operator];
+        return m ? [{ method: m, self: d.expr, args: [], callRange: node }] : [];
+    }
+    if (k === 'AugmentedAssignment') {
+        const m = AUGMENTED_OPERATORS[d.operator];
+        return m ? [{ method: m, self: d.leftExpr, args: [d.rightExpr].filter(Boolean), callRange: node }] : [];
+    }
+    if (k === 'Index') {
+        const parent: any = (node as any).parent;
+        const isSet = parent && node_kind(parent) === 'Assignment' && parent.d?.leftExpr === node;
+        const argExprs: ParseNode[] = (d.items ?? []).map((it: any) => it?.d?.valueExpr ?? it).filter(Boolean);
+        if (isSet && parent?.d?.rightExpr) argExprs.push(parent.d.rightExpr);
+        return [{ method: isSet ? '__setitem__' : '__getitem__', self: d.leftExpr, args: argExprs, callRange: node }];
+    }
+    if (k === 'For')   return d.iterableExpr ? [{ method: '__iter__',  self: d.iterableExpr, args: [], callRange: node }] : [];
+    if (k === 'Await') return d.expr         ? [{ method: '__await__', self: d.expr,         args: [], callRange: node }] : [];
+    if (k === 'With') {
+        const out: DunderDispatch[] = [];
+        for (const wi of d.withItems ?? []) {
+            const cm = wi?.d?.expr;
+            if (!cm) continue;
+            out.push({ method: '__enter__', self: cm, args: [], callRange: wi });
+            out.push({ method: '__exit__',  self: cm, args: [], callRange: wi });
+        }
+        return out;
+    }
+    return [];
+}
+
+export function is_method(funcDeclNode: ParseNode): boolean {
     let n: any = funcDeclNode;
     while ((n = n?.parent)) {
         const k = node_kind(n);

@@ -42,6 +42,14 @@ export const PRINT_OPTS = data.PRINT_OPTS as Record<string, boolean>;
 export const EMPTY_TYPES = new Set(data.EMPTY_TYPES as string[]);
 export const CALLABLE_RETURN_RE = new RegExp(data.CALLABLE_RETURN_PATTERN as string);
 
+const numericMap = (obj: Record<string, string>): Record<number, string> =>
+    Object.fromEntries(Object.entries(obj).map(([k, v]) => [Number(k), v]));
+
+export const BINARY_OPERATORS    = numericMap(data.BINARY_OPERATORS    as Record<string, string>);
+export const UNARY_OPERATORS     = numericMap(data.UNARY_OPERATORS     as Record<string, string>);
+export const AUGMENTED_OPERATORS = numericMap(data.AUGMENTED_OPERATORS as Record<string, string>);
+export const BUILTIN_DUNDERS_MAP = new Map(Object.entries(data.BUILTIN_DUNDERS as Record<string, string>));
+
 export const PYRIGHT = data.PYRIGHT as {
     analyzer_name: string;
     input_filename: string;

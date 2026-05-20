@@ -69,6 +69,36 @@
 
     "CALLABLE_RETURN_PATTERN": "^Callable\\[(?:\\.\\.\\.|\\[[^\\]]*\\]),\\s*(.*)\\]$",
 
+    "BINARY_OPERATORS": {
+        "0":  "__add__",      "33": "__sub__",       "26": "__mul__",
+        "13": "__floordiv__", "10": "__truediv__",   "24": "__mod__",
+        "29": "__pow__",      "22": "__matmul__",
+        "3":  "__and__",      "6":  "__or__",        "8":  "__xor__",
+        "17": "__lshift__",   "31": "__rshift__",
+        "12": "__eq__",       "28": "__ne__",
+        "20": "__lt__",       "21": "__le__",
+        "15": "__gt__",       "16": "__ge__"
+    },
+    "UNARY_OPERATORS": {
+        "0":  "__pos__",
+        "33": "__neg__",
+        "5":  "__invert__",
+        "38": "__bool__"
+    },
+    "AUGMENTED_OPERATORS": {
+        "1":  "__iadd__",      "34": "__isub__",      "27": "__imul__",
+        "14": "__ifloordiv__", "11": "__itruediv__",  "25": "__imod__",
+        "30": "__ipow__",      "23": "__imatmul__",
+        "4":  "__iand__",      "7":  "__ior__",       "9":  "__ixor__",
+        "18": "__ilshift__",   "32": "__irshift__"
+    },
+    "BUILTIN_DUNDERS": {
+        "len": "__len__",     "iter": "__iter__",    "next": "__next__",
+        "repr": "__repr__",   "str": "__str__",      "hash": "__hash__",
+        "bool": "__bool__",   "abs": "__abs__",
+        "int": "__int__",     "float": "__float__",  "reversed": "__reversed__"
+    },
+
     "PYRIGHT": {
         "analyzer_name":          "incandescent",
         "input_filename":         "__incandescent_input.py",
