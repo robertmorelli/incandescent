@@ -19,19 +19,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with:
-          submodules: recursive
-      - uses: oven-sh/setup-bun@v2
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-      - name: Build pyright submodule
-        working-directory: pyright/packages/pyright-internal
-        run: |
-          npm install
-          npm run build
-      - run: bun install
-      - run: bun build.js
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:
