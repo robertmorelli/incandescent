@@ -107,24 +107,51 @@ function annotation_type_object(a: Analysis, annotation: ParseNode): any | undef
     let typ: any;
     try { typ = a.evaluator.getTypeOfAnnotation?.(annotation as any); } catch {}
     if (isUseful(typ)) return typ;
+
+    // Pyright can report Unknown for the bare `None` annotation expression even
+    // though the checker exposes the canonical NoneType instance directly.
+    if (a.sourceText.slice(annotation.start, annotation.start + annotation.length) === 'None') {
+        let noneType: any;
+        try { noneType = a.evaluator.getNoneType?.(); } catch {}
+        if (isUseful(noneType)) return noneType;
+    }
+
     let alt: any;
     try { alt = a.evaluator.getTypeOfExpression?.(annotation as any)?.type; } catch {}
     if (isUseful(alt)) return alt;
     return typ ?? alt;
 }
 
+function type_has_any_unknown(typ: any, seen = new Set<any>()): boolean {
+    if (!typ || seen.has(typ)) return false;
+    seen.add(typ);
+
+    if (classify_type_kind(typ) === 'dynamic_unknown') return true;
+
+    if (typ.category === 8 /* Union */) {
+        return (typ.priv?.subtypes ?? []).some((subtype: any) => type_has_any_unknown(subtype, seen));
+    }
+
+    if (typ.category === 6 /* Class */) {
+        if ((typ.priv?.typeArgs ?? []).some((typeArg: any) => type_has_any_unknown(typeArg, seen))) return true;
+        if ((typ.priv?.tupleTypeArgs ?? []).some((tupleArg: any) => type_has_any_unknown(tupleArg?.type, seen))) return true;
+        if ((typ.props?.typeAliasInfo?.typeArgs ?? []).some((typeArg: any) => type_has_any_unknown(typeArg, seen))) return true;
+    }
+
+    return false;
+}
+
 export function printed_annotation_type(a: Analysis, annotation: ParseNode): { type: any; printed: string } {
     const typ = annotation_type_object(a, annotation);
     if (!typ) return { type: undefined, printed: '' };
-    const kind = classify_type_kind(typ);
-    if (kind === 'dynamic_unknown') return { type: typ, printed: '' };
+    if (type_has_any_unknown(typ)) return { type: typ, printed: '' };
     let printed = '';
     try { printed = print_type(a.evaluator, typ); } catch {}
     return { type: typ, printed };
 }
 
 function enclosing(node: ParseNode | undefined, kinds: string[]): ParseNode | undefined {
-    let cur: any = node?.parent;
+    let cur: any = (node as any)?.parent;
     while (cur) {
         if (kinds.includes(node_kind(cur))) return cur;
         cur = cur.parent;
