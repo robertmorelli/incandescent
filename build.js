@@ -44,7 +44,7 @@ const browserifyPlugin = {
     name: 'browserify-plugin',
     setup(build) {
         build.onResolve({ filter: /^(worker_threads|child_process|fs|os|readline)$/ }, args => {
-            const shimPath = path.resolve(`./web/shims/${args.path}.js`);
+            const shimPath = path.resolve(`./docs/shims/${args.path}.js`);
             return { path: shimPath };
         });
 
@@ -57,9 +57,9 @@ const browserifyPlugin = {
     }
 };
 
-console.log("Bundling web/demo.js for the browser...");
+console.log("Bundling docs/demo.js for the browser...");
 const result = await Bun.build({
-    entrypoints: ['web/demo-entry.js'],
+    entrypoints: ['docs/demo-entry.js'],
     bundle: true,
     minify: true,
     plugins: [browserifyPlugin],
@@ -73,8 +73,8 @@ const result = await Bun.build({
 
 if (result.success) {
     if (result.outputs.length > 0) {
-        await Bun.write('web/demo.bundled.js', result.outputs[0]);
-        console.log("Web demo bundled successfully into web/demo.bundled.js!");
+        await Bun.write('docs/demo.bundled.js', result.outputs[0]);
+        console.log("Web demo bundled successfully into docs/demo.bundled.js!");
     } else {
         console.error("No outputs returned from build!");
     }

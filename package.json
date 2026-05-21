@@ -3,7 +3,7 @@
   "private": true,
   "scripts": {
     "build:web": "bun build.js",
-    "serve:web": "bun web/static-server.ts",
+    "serve:web": "bun docs/static-server.ts",
     "start": "bun run build:web && bun run serve:web",
     "test": "bun test"
   },
