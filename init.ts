@@ -346,11 +346,12 @@ export function create_session(): Session {
     const fs = new InMemoryOverlayFileSystem(createFromRealFileSystem(undefined, console));
     const sp = createServiceProvider(fs, console);
     const cwd = typeof process !== 'undefined' && process.cwd ? process.cwd() : '/';
+    const here = import.meta.dir;
 
     const configOptions = new ConfigOptions(UriEx.file(cwd, sp));
-    configOptions.typeshedPath = UriEx.file(`${cwd}/${PYRIGHT.typeshed_path}`, sp);
-    configOptions.stubPath = UriEx.file(`${cwd}/${PYRIGHT.stub_path}`, sp);
-    configOptions.defaultExtraPaths = PYRIGHT.extra_paths.map(p => UriEx.file(`${cwd}/${p}`, sp));
+    configOptions.typeshedPath = UriEx.file(`${here}/${PYRIGHT.typeshed_path}`, sp);
+    configOptions.stubPath = UriEx.file(`${here}/${PYRIGHT.stub_path}`, sp);
+    configOptions.defaultExtraPaths = PYRIGHT.extra_paths.map(p => UriEx.file(`${here}/${p}`, sp));
     configOptions.useLibraryCodeForTypes = PYRIGHT.useLibraryCodeForTypes;
     configOptions.indexing = PYRIGHT.indexing;
 
