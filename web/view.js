@@ -87,7 +87,14 @@ export function createView(opts) {
         return out;
     }
 
+    function syncDisplaySourceFromMain() {
+        if (!editable) return;
+        if (lineStart !== undefined && lineEnd !== undefined) return;
+        displaySource = main.innerText;
+    }
+
     function repaintMain() {
+        syncDisplaySourceFromMain();
         const filteredHighlights = translate(highlights.map(h => ({ ...h, start: h.start, end: h.end })));
         const marks = syntaxMarks(filteredHighlights);
         if (editable) {
@@ -101,6 +108,7 @@ export function createView(opts) {
 
     function repaintLayer(name) {
         if (!layers[name]) return;
+        syncDisplaySourceFromMain();
         const ms = translate(layerMarks[name].map(m => ({ start: m.start, end: m.end, style: 'background:transparent' })));
         // Layer content is just position-padding: space everywhere, block char at highlighted
         // positions, newlines preserved. Same column count as the source, so it aligns under the
@@ -117,6 +125,7 @@ export function createView(opts) {
 
     function repaintBg() {
         if (!bg) return;
+        syncDisplaySourceFromMain();
         const ms = translate(bgMarks);
         // Same position-padding trick as layers — bg never duplicates the source text.
         const buf = new Array(displaySource.length);

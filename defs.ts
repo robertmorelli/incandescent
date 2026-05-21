@@ -60,6 +60,7 @@ export type Analysis = {
     root: ParseNode;
     parseResults: any;
     evaluator: any;
+    facts: any;
     diagnostics: unknown[];
     offsetAt: (range: any) => { start: number; end: number };
 };
@@ -90,6 +91,7 @@ export type BackMaps = {
     args_by_parameter_id:   Map<number, Range[]>;
     calls_by_function_id:   Map<number, Range[]>;
     returns_by_function_id: Map<number, Range[]>;
+    indexed_by_id:          Map<number, Range[]>;
     tied_to_id:             Map<number, number[]>;
 };
 

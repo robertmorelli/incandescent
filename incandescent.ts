@@ -1,6 +1,6 @@
 import { getChildNodes } from './pyright/packages/pyright-internal/out/packages/pyright-internal/src/analyzer/parseTreeWalker.js';
 import type { Analysis, BackMaps, DefinitionInfo, NodeInfo, ParseNode, SegItem } from './defs.ts';
-import { BUILTIN_DUNDERS, classes, compute_ties, find_dunder_decl, implicit_dunder_dispatches, is_method, make_payloads, match_call_args, resolve_call_target, returns_in_function } from './collectors.ts';
+import { classes, compute_ties, make_payloads } from './collectors.ts';
 import type { Range, Role } from './defs.ts';
 import { create_session, type Session } from './init.ts';
 import {
@@ -58,26 +58,11 @@ function collect_from_analysis(a: Analysis): TreeMap {
     const args_by_parameter_id   = new Map<number, Range[]>();
     const calls_by_function_id   = new Map<number, Range[]>();
     const returns_by_function_id = new Map<number, Range[]>();
+    const indexed_by_id          = new Map<number, Range[]>();
 
     const push_range = (m: Map<number, Range[]>, id: number, r: Range) => {
         const list = m.get(id);
         if (list) list.push(r); else m.set(id, [r]);
-    };
-
-    const decl_for_param_name_node = (nameNode: any): any | undefined => {
-        if (!nameNode) return undefined;
-        try { return a.evaluator.getDeclInfoForNameNode?.(nameNode)?.decls?.[0]; }
-        catch { return undefined; }
-    };
-    const record_call = (funcId: number, callNode: ParseNode, params: any[], argExprs: ParseNode[]) => {
-        push_range(calls_by_function_id, funcId, { start: callNode.start, end: callNode.start + callNode.length });
-        for (let i = 0; i < argExprs.length && i < params.length; i++) {
-            const ae = argExprs[i]; if (!ae) continue;
-            const paramDecl = decl_for_param_name_node((params[i] as any)?.d?.name);
-            const paramId = paramDecl ? decl_id_by_decl(paramDecl) : undefined;
-            if (paramId === undefined) continue;
-            push_range(args_by_parameter_id, paramId, { start: ae.start, end: ae.start + ae.length });
-        }
     };
 
     // Walk the AST once. For each node:
@@ -90,42 +75,50 @@ function collect_from_analysis(a: Analysis): TreeMap {
         const d: any = (node as any).d;
 
         if (k === 'Call') {
-            const targetDecl = resolve_call_target(a, node);
+            const targetDecl = a.facts.getCallInfo(node).declarations[0];
             if (targetDecl) {
                 const funcId = decl_id_by_decl(targetDecl);
                 if (funcId !== undefined) {
                     push_range(calls_by_function_id, funcId, { start: node.start, end: node.start + node.length });
-                    for (const m of match_call_args(node, targetDecl.node)) {
-                        const paramDecl = decl_for_param_name_node((m.paramNode as any)?.d?.name);
-                        const paramId = paramDecl ? decl_id_by_decl(paramDecl) : undefined;
+                    for (const m of a.facts.getCallInfo(node).argMap) {
+                        const paramId = m.paramDecl ? decl_id_by_decl(m.paramDecl) : undefined;
                         if (paramId === undefined) continue;
                         push_range(args_by_parameter_id, paramId, { start: m.argExpr.start, end: m.argExpr.start + m.argExpr.length });
                     }
                 }
             }
-            // len(x) / iter(x) / etc. — also record as a call of x's dunder.
-            const left = d?.leftExpr;
-            const builtin = left && node_kind(left) === 'Name' ? (left.d as any)?.value : undefined;
-            const dunderName = builtin ? BUILTIN_DUNDERS.get(builtin) : undefined;
-            if (dunderName) {
-                const firstArg = d?.args?.[0]?.d?.valueExpr;
-                if (firstArg) {
-                    const dunderDecl = find_dunder_decl(a, firstArg, dunderName);
-                    const dunderId = dunderDecl ? decl_id_by_decl(dunderDecl) : undefined;
-                    if (dunderId !== undefined) push_range(calls_by_function_id, dunderId, { start: node.start, end: node.start + node.length });
-                }
+            // len(x) / iter(x) / etc. — also record as a call of x's protocol dunder.
+            for (const disp of a.facts.getBuiltinProtocolCalls(node)) {
+                const dunderDecl = disp.declaration;
+                const dunderId = dunderDecl ? decl_id_by_decl(dunderDecl) : undefined;
+                if (dunderId !== undefined) push_range(calls_by_function_id, dunderId, { start: node.start, end: node.start + node.length });
             }
             continue;
         }
 
-        for (const disp of implicit_dunder_dispatches(node)) {
-            const dunderDecl = find_dunder_decl(a, disp.self, disp.method);
+        if (k === 'Index') {
+            const leftExpr = d.leftExpr;
+            const baseInfo = leftExpr ? a.facts.getDefinitionForNode(leftExpr) : undefined;
+            const baseId = baseInfo?.decl ? decl_id_by_decl(baseInfo.decl) : undefined;
+            if (baseId !== undefined) {
+                for (const item of d.items ?? []) {
+                    const expr = item.d?.valueExpr ?? item;
+                    push_range(indexed_by_id, baseId, { start: expr.start, end: expr.start + expr.length });
+                }
+            }
+        }
+
+        for (const disp of a.facts.getImplicitCalls(node)) {
+            const dunderDecl = disp.declaration;
             if (!dunderDecl) continue;
             const funcId = decl_id_by_decl(dunderDecl);
             if (funcId === undefined) continue;
-            const rawParams = (dunderDecl.node?.d as any)?.params ?? [];
-            const params = is_method(dunderDecl.node) ? rawParams.slice(1) : rawParams;
-            record_call(funcId, disp.callRange, params, disp.args);
+            push_range(calls_by_function_id, funcId, { start: disp.callRange.start, end: disp.callRange.start + disp.callRange.length });
+            for (const m of disp.argMap ?? []) {
+                const paramId = m.paramDecl ? decl_id_by_decl(m.paramDecl) : undefined;
+                if (paramId === undefined) continue;
+                push_range(args_by_parameter_id, paramId, { start: m.argExpr.start, end: m.argExpr.start + m.argExpr.length });
+            }
         }
     }
 
@@ -134,7 +127,7 @@ function collect_from_analysis(a: Analysis): TreeMap {
         if ((declObj as any)?.type !== 5 /* Function */) continue;
         const fnNode = (declObj as any)?.node;
         if (!fnNode) continue;
-        const rets = returns_in_function(fnNode);
+        const rets = a.facts.getReturnInfo(fnNode).expressions;
         if (!rets.length) continue;
         returns_by_function_id.set(def.id, rets.map(r => ({ start: r.start, end: r.start + r.length })));
     }
@@ -159,37 +152,15 @@ function collect_from_analysis(a: Analysis): TreeMap {
         }
     }
 
-    // Annotation owners: every typed location (Parameter.annotation, Function.returnAnnotation,
-    // TypeAnnotation on an assignment) → SegItem whose payload.definition is the *annotated*
-    // entity (parameter, function, variable), not whatever class/type the annotation expression
-    // resolves to. Lets a click on `: int` reflow on the parameter, not on `int`.
+    // Annotation owners come from Pyright facts: every typed location maps to
+    // the annotated entity, not whatever class/type the annotation expression resolves to.
     const annotation_segs: SegItem[] = [];
-    const owner_id_from_name_node = (nameNode: any): DefinitionInfo | undefined => {
-        if (!nameNode) return undefined;
-        try {
-            const info = a.evaluator.getDeclInfoForNameNode?.(nameNode);
-            const decl = info?.decls?.[0];
-            return decl ? definitions.get(decl) : undefined;
-        } catch { return undefined; }
-    };
-    for (const { node } of nodes(a.root)) {
-        const k = node_kind(node);
-        const d: any = (node as any).d;
-        let ann: any, ownerNameNode: any;
-        if      (k === 'Function')       { ann = d?.returnAnnotation; ownerNameNode = d?.name; }
-        else if (k === 'Parameter')      { ann = d?.annotation;       ownerNameNode = d?.name; }
-        else if (k === 'TypeAnnotation') {
-            ann = d?.annotation;
-            const ve: any = d?.valueExpr;
-            // For `self.x: T = ...` the valueExpr is a MemberAccess; resolve via its .member name.
-            ownerNameNode = ve && node_kind(ve) === 'MemberAccess' ? ve.d?.member : ve;
-        }
-        if (!ann || !ownerNameNode) continue;
-        const owner = owner_id_from_name_node(ownerNameNode);
+    for (const { annotation, ownerDecl } of a.facts.getAnnotationOwners(a.root)) {
+        const owner = definitions.get(ownerDecl);
         if (!owner) continue;
         annotation_segs.push({
-            start: ann.start, end: ann.start + ann.length, height: 0,
-            payload: { definition: owner, name: owner.name, node: ann },
+            start: annotation.start, end: annotation.start + annotation.length, height: 0,
+            payload: { definition: owner, name: owner.name, node: annotation },
             id: annotation_segs.length,
         });
     }
@@ -269,6 +240,7 @@ function collect_from_analysis(a: Analysis): TreeMap {
             args_by_parameter_id:   reflow_list(args_by_parameter_id),
             calls_by_function_id:   reflow_list(calls_by_function_id),
             returns_by_function_id: reflow_list(returns_by_function_id),
+            indexed_by_id:          reflow_list(indexed_by_id),
             tied_to_id,
         },
     };

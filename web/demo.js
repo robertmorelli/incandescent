@@ -1,7 +1,7 @@
 import { offsetFromPoint, saveCaret } from './caret.js';
 import { BG, FG, markup, RAINBOW } from './render.js';
 import { buildLineToCharRange, createView, lineOf } from './view.js';
-import { connect } from './ws.js';
+import { create_analysis_session } from '../incandescent.ts';
 
 // Each reflow table → which rainbow color identifies it.
 const CATEGORIES = [
@@ -11,6 +11,7 @@ const CATEGORIES = [
     { key: 'args',    color: 'green',  label: 'args'    },
     { key: 'calls',   color: 'blue',   label: 'calls'   },
     { key: 'returns', color: 'indigo', label: 'returns' },
+    { key: 'indexed', color: 'red',    label: 'indexed' },
 ];
 
 // CSS rgba values matched to the layer colors (used for data-view borders + section labels).
@@ -47,11 +48,125 @@ let lastCursorReflowId = null, lastMouseReflowId = null;
 
 const source = () => mainView.main.innerText;
 
-const wsUrl = `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws`;
-const tx = connect(wsUrl, {
-    onopen: () => analyze(),
-    onmessage: handleMessage,
-});
+// Initialize in-memory serverless analysis session
+const session = create_analysis_session();
+let activeTrees = null;
+
+function ranges(tree) {
+    return [...tree.ranges_by_id.values()].map((r) => ({
+        start: r.start,
+        end: r.end,
+        height: r.height,
+        payload: {
+            kind: r.payload.kind,
+            type: r.payload.type,
+            name: r.payload.name,
+            definition: r.payload.definition,
+        },
+    }));
+}
+
+function best(tree, spans) {
+    return spans
+        .map(([s, e]) => tree.query_max(s, e))
+        .filter(Boolean)
+        .sort((a, b) => b.height - a.height)[0];
+}
+
+function reflow(trees, id) {
+    const b = trees.backmaps;
+    const def_by_id = new Map();
+    for (const r of trees.identifier_definitions.ranges_by_id.values()) {
+        const d = r.payload.definition;
+        if (d) def_by_id.set(d.id, { start: r.start, end: r.end });
+    }
+    const range_of = (i) => def_by_id.get(i);
+    const tied_ids = b.tied_to_id.get(id) ?? [];
+    const seen = new Set();
+    const linked = [];
+    for (const i of [id, ...tied_ids]) {
+        const r = range_of(i);
+        if (!r) continue;
+        const k = `${r.start}:${r.end}`;
+        if (seen.has(k)) continue;
+        seen.add(k);
+        linked.push(r);
+    }
+    return {
+        id,
+        role:    b.role_by_id.get(id),
+        linked,
+        reads:   (b.reads_by_id.get(id)  ?? []).map(r => ({ start: r.start, end: r.end })),
+        writes:  (b.writes_by_id.get(id) ?? []).map(r => ({ start: r.start, end: r.end })),
+        args:     b.args_by_parameter_id.get(id)   ?? [],
+        calls:    b.calls_by_function_id.get(id)   ?? [],
+        returns:  b.returns_by_function_id.get(id) ?? [],
+        indexed:  b.indexed_by_id.get(id)          ?? [],
+    };
+}
+
+function info(trees, start, end) {
+    const point = start === end;
+    const s = Math.min(start, end), e = Math.max(start, end);
+    const spans = point ? [[start, start + 1], [Math.max(0, start - 1), start]] : [[s, e]];
+    const expr = best(trees.expression_types, spans);
+    const annOwner = best(trees.annotation_owners, spans);
+    const use = annOwner ?? best(trees.identifier_uses, spans);
+    const defId = use?.payload.definition?.id;
+    return {
+        range: point ? { cursor: start } : { start: s, end: e },
+        line: trees.lines.query_max(start, point ? start + 1 : end)?.payload.name,
+        type: expr?.payload.type,
+        definition: use?.payload.definition,
+        expression_range: expr ? { start: expr.start, end: expr.end } : undefined,
+        found_range: use?.payload.definition ? { start: use.payload.definition.start, end: use.payload.definition.end } : undefined,
+        reflow: defId !== undefined ? reflow(trees, defId) : undefined,
+    };
+}
+
+const tx = {
+    send(msg) {
+        if (msg.kind === 'analyze') {
+            const t0 = performance.now();
+            const result = session.collect_trees_timed(msg.source);
+            activeTrees = result.trees;
+            const t1 = performance.now();
+            const hs = ranges(activeTrees.highlights);
+            const t2 = performance.now();
+
+            const response = {
+                kind: 'analyze',
+                seq: msg.seq,
+                client_sent_at: msg.client_sent_at,
+                highlights: hs,
+                timing: {
+                    bytes: msg.source.length,
+                    server_receive_ms: 0,
+                    service_ms: result.timing.service_ms,
+                    tree_build_ms: result.timing.tree_build_ms,
+                    total_collect_ms: result.timing.total_collect_ms,
+                    server_outer_collect_ms: +(t1 - t0).toFixed(2),
+                    serialize_highlights_ms: +(t2 - t1).toFixed(2),
+                    server_total_ms: +(t2 - t0).toFixed(2),
+                }
+            };
+            setTimeout(() => handleMessage(response), 0);
+        } else if (msg.kind === 'info') {
+            if (!activeTrees) {
+                activeTrees = session.collect_trees(source());
+            }
+            const infoData = info(activeTrees, msg.start, msg.end);
+            const response = {
+                kind: 'info',
+                target: msg.target,
+                data: infoData
+            };
+            setTimeout(() => handleMessage(response), 0);
+        }
+    }
+};
+
+setTimeout(() => analyze(), 0);
 
 function handleMessage(msg) {
     if (msg.kind === 'analyze') {

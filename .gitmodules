@@ -1,3 +1,4 @@
 [submodule "pyright"]
 	path = pyright
-	url = https://github.com/microsoft/pyright.git
+	url = https://github.com/robertmorelli/pyright.git
+
