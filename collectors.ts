@@ -64,6 +64,11 @@ function full_name(typ: any): string | undefined {
 }
 
 const NONE_NAMES = new Set(['builtins.NoneType', 'types.NoneType']);
+const SYNTHETIC_NONE_TYPE = {
+    category: 6, // Class
+    shared: { fullName: 'builtins.NoneType' },
+    incandescentSynthetic: 'none-type',
+};
 
 function is_none_instance(typ: any): boolean {
     if (typ?.category !== 6 /* Class */) return false;
@@ -108,12 +113,14 @@ function annotation_type_object(a: Analysis, annotation: ParseNode): any | undef
     try { typ = a.evaluator.getTypeOfAnnotation?.(annotation as any); } catch {}
     if (isUseful(typ)) return typ;
 
-    // Pyright can report Unknown for the bare `None` annotation expression even
-    // though the checker exposes the canonical NoneType instance directly.
+    // Pyright can report Unknown for the bare `None` annotation expression in
+    // this fork/stub setup. The checker's getNoneType can also be an Unknown
+    // sentinel, so fall back to a tiny local NoneType-shaped object. We only use
+    // this for Incandescent's kind/print tables, never for type checking.
     if (a.sourceText.slice(annotation.start, annotation.start + annotation.length) === 'None') {
         let noneType: any;
         try { noneType = a.evaluator.getNoneType?.(); } catch {}
-        if (isUseful(noneType)) return noneType;
+        return isUseful(noneType) ? noneType : SYNTHETIC_NONE_TYPE;
     }
 
     let alt: any;
@@ -145,6 +152,7 @@ export function printed_annotation_type(a: Analysis, annotation: ParseNode): { t
     const typ = annotation_type_object(a, annotation);
     if (!typ) return { type: undefined, printed: '' };
     if (type_has_any_unknown(typ)) return { type: typ, printed: '' };
+    if (typ.incandescentSynthetic === 'none-type') return { type: typ, printed: 'None' };
     let printed = '';
     try { printed = print_type(a.evaluator, typ); } catch {}
     return { type: typ, printed };
