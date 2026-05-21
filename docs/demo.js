@@ -52,6 +52,37 @@ const source = () => mainView.main.innerText;
 const session = create_analysis_session();
 let activeTrees = null;
 
+// type_kind → underline color + style. Hue = semantic family, line-style = variant.
+const TYPE_KIND_UNDERLINE = {
+    dynamic_unknown:          { color: '#7a8090', style: 'dashed' },
+    none_only:                { color: '#ffd166', style: 'solid'  },
+    cinder_scalar:            { color: '#5aaaff', style: 'solid'  },
+    cinder_checked_container: { color: '#5aaaff', style: 'double' },
+    python_scalar:            { color: '#6ee678', style: 'solid'  },
+    python_container:         { color: '#6ee678', style: 'dashed' },
+    python_tuple:             { color: '#6ee678', style: 'double' },
+    callable:                 { color: '#ff963c', style: 'solid'  },
+    iterator:                 { color: '#ff963c', style: 'dashed' },
+    optional:                 { color: '#8c6ee6', style: 'solid'  },
+    union:                    { color: '#8c6ee6', style: 'dashed' },
+    python_user_object:       { color: '#ff5a8a', style: 'solid'  },
+};
+
+function typeKindUnderlines(trees) {
+    if (!trees) return [];
+    const out = [];
+    const tk = trees.backmaps.type_kind_by_annotation_id;
+    for (const seg of trees.annotation_owners.ranges_by_id.values()) {
+        const kind = tk.get(seg.id);
+        if (!kind) continue;
+        const m = TYPE_KIND_UNDERLINE[kind];
+        if (!m) continue;
+        const style = `text-decoration:underline;text-decoration-color:${m.color};text-decoration-style:${m.style};text-decoration-thickness:2px;text-underline-offset:3px`;
+        out.push({ start: seg.start, end: seg.end, style, kind });
+    }
+    return out;
+}
+
 function ranges(tree) {
     return [...tree.ranges_by_id.values()].map((r) => ({
         start: r.start,
@@ -113,6 +144,8 @@ function info(trees, start, end) {
     const annOwner = best(trees.annotation_owners, spans);
     const use = annOwner ?? best(trees.identifier_uses, spans);
     const defId = use?.payload.definition?.id;
+    const annId = annOwner?.id;
+    const b = trees.backmaps;
     return {
         range: point ? { cursor: start } : { start: s, end: e },
         line: trees.lines.query_max(start, point ? start + 1 : end)?.payload.name,
@@ -121,6 +154,13 @@ function info(trees, start, end) {
         expression_range: expr ? { start: expr.start, end: expr.end } : undefined,
         found_range: use?.payload.definition ? { start: use.payload.definition.start, end: use.payload.definition.end } : undefined,
         reflow: defId !== undefined ? reflow(trees, defId) : undefined,
+        annotation: annId !== undefined ? {
+            id: annId,
+            range: { start: annOwner.start, end: annOwner.end },
+            context: b.context_label_by_annotation_id.get(annId),
+            type_kind: b.type_kind_by_annotation_id.get(annId),
+            printed_type: b.printed_type_by_annotation_id.get(annId),
+        } : undefined,
     };
 }
 
@@ -178,6 +218,7 @@ function handleMessage(msg) {
         lineToCharRange = buildLineToCharRange(source());
         maxLine = Math.max(1, ...lineToCharRange.keys());
         mainView.setHighlights(highlights);
+        mainView.setUnderlines(typeKindUnderlines(activeTrees));
         lastCursorReflowId = null;
         lastMouseReflowId = null;
         paintOverlays();
@@ -186,7 +227,7 @@ function handleMessage(msg) {
         return;
     }
     if (msg.kind === 'info') {
-        const rid = msg.data.reflow?.id ?? null;
+        const rid = `${msg.data.reflow?.id ?? ''}|${msg.data.annotation?.id ?? ''}`;
         if (msg.target === 'mouse') {
             mouseExpr = msg.data.expression_range;
             if (rid !== lastMouseReflowId) {
@@ -278,8 +319,23 @@ function snippetHTML(range, color) {
 
 function renderColumn(container, data) {
     const reflow = data?.reflow;
-    if (!reflow) { container.innerHTML = ''; return; }
-    let html = `<div style="font:12px/1.4 monospace;color:#aab;padding:0 0 6px 0;">id ${esc(String(reflow.id))} · ${esc(reflow.role ?? '—')}</div>`;
+    const ann = data?.annotation;
+    if (!reflow && !ann) { container.innerHTML = ''; return; }
+    const parts = [];
+    if (reflow) {
+        parts.push(esc(String(reflow.id)));
+        parts.push(esc(reflow.role ?? '—'));
+    }
+    if (ann) {
+        const tk = ann.type_kind ?? '—';
+        const u = TYPE_KIND_UNDERLINE[tk];
+        const tkStyle = u
+            ? `text-decoration:underline;text-decoration-color:${u.color};text-decoration-style:${u.style};text-decoration-thickness:2px;text-underline-offset:3px`
+            : '';
+        parts.push(`<span style="${tkStyle}">${esc(tk)}</span>`);
+    }
+    let html = `<div style="font:12px/1.4 monospace;color:#aab;padding:0 0 6px 0;">${parts.join(' | ')}</div>`;
+    if (!reflow) { container.innerHTML = html; return; }
     for (const { key, color, label } of CATEGORIES) {
         const entries = reflow[key] ?? [];
         if (!entries.length) continue;
@@ -367,6 +423,35 @@ function showMouseAt(x, y) {
     const p = offsetFromPoint(mainView.main, x, y);
     tx.send({ kind: 'info', target: 'mouse', start: p, end: p });
 }
+
+// Devtools ad-hoc dump: window.__dump(pos) shows the classifier result at a source offset.
+globalThis.__trees = () => activeTrees;
+globalThis.__dump = (pos) => {
+    const t = activeTrees; if (!t) return 'no trees';
+    const ann = t.annotation_owners.query_max(pos, pos + 1);
+    if (!ann) return { pos, hit: null };
+    return {
+        pos,
+        ann_id: ann.id,
+        text: source().slice(ann.start, ann.end),
+        context: t.backmaps.context_label_by_annotation_id.get(ann.id),
+        type_kind: t.backmaps.type_kind_by_annotation_id.get(ann.id),
+        printed: t.backmaps.printed_type_by_annotation_id.get(ann.id),
+    };
+};
+globalThis.__dumpAll = () => {
+    const t = activeTrees; if (!t) return 'no trees';
+    const out = [];
+    for (const s of t.annotation_owners.ranges_by_id.values()) {
+        out.push({
+            id: s.id,
+            text: source().slice(s.start, s.end),
+            type_kind: t.backmaps.type_kind_by_annotation_id.get(s.id),
+            printed: t.backmaps.printed_type_by_annotation_id.get(s.id),
+        });
+    }
+    return out;
+};
 
 // Devtools ad-hoc API (paint rainbow layers on the main view).
 globalThis.paintLayer     = (name, marks) => mainView.paintLayer(name, marks);

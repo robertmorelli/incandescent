@@ -47,6 +47,187 @@ export function pyright_type_with_recovery(a: Analysis, n: ParseNode): string | 
     return pyright_type(a.evaluator, n);
 }
 
+// --- Annotation context / type-kind / literal classifiers -----------------
+
+const CINDER_SCALAR_NAMES = new Set([
+    '__static__.int64', '__static__.int32', '__static__.int16', '__static__.int8',
+    '__static__.uint64', '__static__.uint32', '__static__.uint16', '__static__.uint8',
+    '__static__.double', '__static__.float64', '__static__.float32', '__static__.cbool',
+]);
+const CINDER_CHECKED_NAMES = new Set(['__static__.CheckedList', '__static__.CheckedDict']);
+const PYTHON_SCALAR_NAMES = new Set(['builtins.int', 'builtins.float', 'builtins.bool', 'builtins.str', 'builtins.bytes']);
+const PYTHON_CONTAINER_NAMES = new Set(['builtins.list', 'builtins.dict', 'builtins.set', 'builtins.frozenset']);
+const ITERATOR_NAMES = new Set(['typing.Iterator', 'typing.Generator', 'typing.Iterable']);
+
+function full_name(typ: any): string | undefined {
+    return typ?.shared?.fullName;
+}
+
+const NONE_NAMES = new Set(['builtins.NoneType', 'types.NoneType']);
+
+function is_none_instance(typ: any): boolean {
+    if (typ?.category !== 6 /* Class */) return false;
+    const fn = full_name(typ);
+    return !!fn && NONE_NAMES.has(fn);
+}
+
+export function classify_type_kind(typ: any): string {
+    if (!typ) return 'dynamic_unknown';
+    const cat = typ.category;
+    if (cat === 1 /* Unknown */ || cat === 2 /* Any */) return 'dynamic_unknown';
+    if (cat === 4 /* Function */ || cat === 5 /* Overloaded */) return 'callable';
+    if (cat === 8 /* Union */) {
+        const subs: any[] = typ.priv?.subtypes ?? [];
+        if (subs.some(is_none_instance)) return 'optional';
+        return 'union';
+    }
+    if (cat === 6 /* Class */) {
+        const fn = full_name(typ);
+        if (fn && NONE_NAMES.has(fn)) return 'none_only';
+        if (fn && CINDER_SCALAR_NAMES.has(fn)) return 'cinder_scalar';
+        if (fn && CINDER_CHECKED_NAMES.has(fn)) return 'cinder_checked_container';
+        if (fn && PYTHON_SCALAR_NAMES.has(fn)) return 'python_scalar';
+        if (fn && PYTHON_CONTAINER_NAMES.has(fn)) return 'python_container';
+        if (fn === 'builtins.tuple') return 'python_tuple';
+        if (fn && ITERATOR_NAMES.has(fn)) return 'iterator';
+        return 'python_user_object';
+    }
+    return 'python_user_object';
+}
+
+// Print an annotation's resolved type, or '' if Pyright leaks Any/Unknown.
+//
+// We try getTypeOfAnnotation first because it correctly interprets annotation
+// expressions (e.g. `int | None` becomes a Union of instances). If that comes
+// back as Unknown/Any/Unbound, fall back to getTypeOfExpression — pyright may
+// have indexed the symbol even when annotation interpretation flaked.
+function annotation_type_object(a: Analysis, annotation: ParseNode): any | undefined {
+    const isUseful = (t: any) =>
+        t && t.category !== 0 /* Unbound */ && t.category !== 1 /* Unknown */ && t.category !== 2 /* Any */;
+    let typ: any;
+    try { typ = a.evaluator.getTypeOfAnnotation?.(annotation as any); } catch {}
+    if (isUseful(typ)) return typ;
+    let alt: any;
+    try { alt = a.evaluator.getTypeOfExpression?.(annotation as any)?.type; } catch {}
+    if (isUseful(alt)) return alt;
+    return typ ?? alt;
+}
+
+export function printed_annotation_type(a: Analysis, annotation: ParseNode): { type: any; printed: string } {
+    const typ = annotation_type_object(a, annotation);
+    if (!typ) return { type: undefined, printed: '' };
+    const kind = classify_type_kind(typ);
+    if (kind === 'dynamic_unknown') return { type: typ, printed: '' };
+    let printed = '';
+    try { printed = print_type(a.evaluator, typ); } catch {}
+    return { type: typ, printed };
+}
+
+function enclosing(node: ParseNode | undefined, kinds: string[]): ParseNode | undefined {
+    let cur: any = node?.parent;
+    while (cur) {
+        if (kinds.includes(node_kind(cur))) return cur;
+        cur = cur.parent;
+    }
+    return undefined;
+}
+
+function fn_name(fn: ParseNode | undefined, source: string): string | undefined {
+    const nameNode = (fn as any)?.d?.name;
+    return nameNode ? read_name(nameNode, source) : undefined;
+}
+
+function is_none_literal_node(node: ParseNode | undefined, source: string): boolean {
+    if (!node) return false;
+    if (node_kind(node) !== 'Constant') return false;
+    // Match by source text — robust to enum drift.
+    return source.slice(node.start, node.start + node.length) === 'None';
+}
+
+export function classify_annotation_context(
+    annotation: ParseNode,
+    source: string,
+): string | undefined {
+    const parent: any = (annotation as any).parent;
+    if (!parent) return undefined;
+    const pk = node_kind(parent);
+
+    if (pk === 'Function') {
+        // Return annotation.
+        const enclClass = enclosing(parent, ['Class']);
+        if (!enclClass) return 'function_return_annotation';
+        const name = fn_name(parent, source);
+        if (name === '__init__') return 'constructor_return_annotation';
+        return 'method_return_annotation';
+    }
+    if (pk === 'Parameter') {
+        const fn = enclosing(parent, ['Function', 'Lambda']);
+        const enclClass = fn ? enclosing(fn, ['Class']) : undefined;
+        if (!fn || !enclClass) return 'function_parameter_annotation';
+        const name = fn_name(fn, source);
+        if (name === '__init__') return 'constructor_parameter_annotation';
+        return 'method_parameter_annotation';
+    }
+    if (pk === 'TypeAnnotation') {
+        const valueExpr = (parent as any).d?.valueExpr;
+        const isMember = valueExpr && node_kind(valueExpr) === 'MemberAccess';
+
+        // Determine if the TypeAnnotation has an assigned value.
+        let assignedValue: ParseNode | undefined;
+        const gp: any = (parent as any).parent;
+        if (gp && node_kind(gp) === 'Assignment' && gp.d?.leftExpr === parent) {
+            assignedValue = gp.d?.rightExpr;
+        }
+        const suffix = !assignedValue
+            ? '_no_value'
+            : is_none_literal_node(assignedValue, source)
+                ? '_with_none'
+                : '_with_value';
+
+        const fn = enclosing(parent, ['Function', 'Lambda']);
+        const cls = enclosing(parent, ['Class']);
+
+        if (isMember) {
+            const name = fn ? fn_name(fn, source) : undefined;
+            const prefix = name === '__init__'
+                ? 'init_instance_variable_annotation'
+                : 'non_init_instance_variable_annotation';
+            return prefix + suffix;
+        }
+        if (!fn && !cls) return 'module_global_annotation' + suffix;
+        if (!fn && cls) return 'class_attribute_annotation' + suffix;
+        // Inside a function (and possibly a class).
+        const enclClass = fn ? enclosing(fn, ['Class']) : undefined;
+        let word: string;
+        if (enclClass) {
+            const name = fn_name(fn, source);
+            word = name === '__init__' ? 'constructor' : 'method';
+        } else {
+            word = 'function';
+        }
+        return `${word}_local_annotation${suffix}`;
+    }
+    return undefined;
+}
+
+// Per-node literal tag. Returns undefined for nodes that aren't expressions
+// where a literal/value distinction is meaningful.
+const LITERAL_NODE_KINDS = new Set([
+    'Constant', 'Number', 'StringList', 'String', 'FormatString', 'Ellipsis',
+]);
+
+export function classify_literal(node: ParseNode, source: string): 'literal' | 'none_literal' | 'value' | undefined {
+    const k = node_kind(node);
+    if (k === 'Constant') {
+        return source.slice(node.start, node.start + node.length) === 'None' ? 'none_literal' : 'literal';
+    }
+    if (LITERAL_NODE_KINDS.has(k)) return 'literal';
+    // Mark every other expression node as 'value'. Restrict to nodes Pyright treats as expressions.
+    const behavior = (NODE as any)[k];
+    if (behavior?.isExpression) return 'value';
+    return undefined;
+}
+
 export type DeclInfo = Omit<DefinitionInfo, 'id'> & { decl: any };
 
 export function pyright_decl(a: Analysis, n: ParseNode): DeclInfo | undefined {

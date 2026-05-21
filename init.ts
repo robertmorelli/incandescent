@@ -136,29 +136,58 @@ def native(so_path: str): ...
 class StaticGeneric(Generic[_T]): ...
 `;
 
+// Pre-compute every directory that appears as an ancestor of a TYPESHED_CACHE
+// key, so directory existence checks are O(1) instead of O(N) per probe.
+const TYPESHED_DIRS: Set<string> = (() => {
+    const dirs = new Set<string>();
+    for (const k of Object.keys(TYPESHED_CACHE)) {
+        const parts = k.split('/');
+        for (let i = 1; i < parts.length; i++) {
+            dirs.add(parts.slice(0, i).join('/'));
+        }
+    }
+    return dirs;
+})();
+
 class InMemoryOverlayFileSystem extends PyrightFileSystem {
     private getNormalizedPath(uri: any): string {
-        const filePath = uri.getFilePath();
-        return filePath ? filePath.replace(/\\/g, '/') : '';
+        const filePath = (uri.getFilePath && uri.getFilePath()) || (uri.toString && uri.toString()) || '';
+        let s = String(filePath).replace(/\\/g, '/');
+        if (s.startsWith('file://')) s = s.slice(7);
+        // Collapse repeated slashes to a single one. Browser cwd shim is '/',
+        // so paths often arrive as '//pyright/...' or even '///stubs/...'.
+        s = s.replace(/\/+/g, '/');
+        return s;
     }
 
     private isInitPath(p: string): boolean {
-        return p.endsWith('/stubs/__static__/__init__.pyi');
+        return p.endsWith('/__static__/__init__.pyi') || p === '__static__/__init__.pyi';
     }
 
     private isStaticPath(p: string): boolean {
-        return p.endsWith('/stubs/__static__');
+        return p.endsWith('/__static__') || p === '__static__';
     }
 
     private isStubsPath(p: string): boolean {
-        return p.endsWith('/stubs');
+        return p.endsWith('/stubs') || p === 'stubs' || p === '/';
     }
 
+    // Pyright asks for typeshed files at various roots depending on how the
+    // service was configured (real-fs path, in-memory cwd, etc). Rather than
+    // matching one exact prefix, peel the path back component-by-component and
+    // probe the cache for any suffix key that lives in TYPESHED_CACHE or is a
+    // parent directory of one.
     private getTypeshedKey(p: string): string | null {
-        const needle = 'pyright/packages/pyright-internal/typeshed-fallback/';
-        const idx = p.indexOf(needle);
-        if (idx !== -1) {
-            return p.substring(idx + needle.length);
+        if (!p) return null;
+        const trimmed = p.replace(/^\/+/, '');
+        const parts = trimmed.split('/');
+        for (let i = 0; i < parts.length; i++) {
+            const suffix = parts.slice(i).join('/');
+            if (suffix in TYPESHED_CACHE) return suffix;
+        }
+        for (let i = 0; i < parts.length; i++) {
+            const suffix = parts.slice(i).join('/');
+            if (suffix && TYPESHED_DIRS.has(suffix)) return suffix;
         }
         return null;
     }

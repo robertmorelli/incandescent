@@ -93,6 +93,15 @@ export type BackMaps = {
     returns_by_function_id: Map<number, Range[]>;
     indexed_by_id:          Map<number, Range[]>;
     tied_to_id:             Map<number, number[]>;
+
+    // Annotation-keyed tables. The key is the SegItem id from the
+    // `annotation_owners` tree (one entry per annotation site).
+    context_label_by_annotation_id: Map<number, string>;
+    type_kind_by_annotation_id:     Map<number, string>;
+    printed_type_by_annotation_id:  Map<number, string>;
+
+    // Per-node literal classification, keyed by ParseNode.id.
+    literal_tag_by_node_id: Map<number, 'literal' | 'none_literal' | 'value'>;
 };
 
 export type Collector = {

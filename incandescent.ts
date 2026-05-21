@@ -1,6 +1,14 @@
 import { getChildNodes } from './pyright/packages/pyright-internal/out/packages/pyright-internal/src/analyzer/parseTreeWalker.js';
 import type { Analysis, BackMaps, DefinitionInfo, NodeInfo, ParseNode, SegItem } from './defs.ts';
-import { classes, compute_ties, make_payloads } from './collectors.ts';
+import {
+    classes,
+    classify_annotation_context,
+    classify_literal,
+    classify_type_kind,
+    compute_ties,
+    make_payloads,
+    printed_annotation_type,
+} from './collectors.ts';
 import type { Range, Role } from './defs.ts';
 import { create_session, type Session } from './init.ts';
 import {
@@ -155,16 +163,32 @@ function collect_from_analysis(a: Analysis): TreeMap {
     // Annotation owners come from Pyright facts: every typed location maps to
     // the annotated entity, not whatever class/type the annotation expression resolves to.
     const annotation_segs: SegItem[] = [];
+    const context_label_by_annotation_id = new Map<number, string>();
+    const type_kind_by_annotation_id     = new Map<number, string>();
+    const printed_type_by_annotation_id  = new Map<number, string>();
     for (const { annotation, ownerDecl } of a.facts.getAnnotationOwners(a.root)) {
         const owner = definitions.get(ownerDecl);
         if (!owner) continue;
+        const id = annotation_segs.length;
         annotation_segs.push({
             start: annotation.start, end: annotation.start + annotation.length, height: 0,
             payload: { definition: owner, name: owner.name, node: annotation },
-            id: annotation_segs.length,
+            id,
         });
+        const ctx = classify_annotation_context(annotation, a.sourceText);
+        if (ctx) context_label_by_annotation_id.set(id, ctx);
+        const { type: annType, printed } = printed_annotation_type(a, annotation);
+        type_kind_by_annotation_id.set(id, classify_type_kind(annType));
+        printed_type_by_annotation_id.set(id, printed);
     }
     const annotation_owners = new PrioritySegTree(annotation_segs);
+
+    // Per-node literal tag. Walks the AST once and tags every expression node.
+    const literal_tag_by_node_id = new Map<number, 'literal' | 'none_literal' | 'value'>();
+    for (const { node } of nodes(a.root)) {
+        const tag = classify_literal(node, a.sourceText);
+        if (tag) literal_tag_by_node_id.set((node as any).id, tag);
+    }
 
     // Ensure classes are cached before computing ties (already used by recovery).
     void classes(a);
@@ -242,6 +266,10 @@ function collect_from_analysis(a: Analysis): TreeMap {
             returns_by_function_id: reflow_list(returns_by_function_id),
             indexed_by_id:          reflow_list(indexed_by_id),
             tied_to_id,
+            context_label_by_annotation_id,
+            type_kind_by_annotation_id,
+            printed_type_by_annotation_id,
+            literal_tag_by_node_id,
         },
     };
 }

@@ -71,8 +71,11 @@ export function createView(opts) {
     container.appendChild(view);
 
     let highlights = [];
+    let underlines = [];
     const layerMarks = Object.fromEntries(layerNames.map(n => [n, []]));
     let bgMarks = [];
+
+    const esc = s => s.replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
 
     function translate(rangesWithStyle) {
         const lo = 0, hi = displaySource.length;
@@ -96,13 +99,35 @@ export function createView(opts) {
     function repaintMain() {
         syncDisplaySourceFromMain();
         const filteredHighlights = translate(highlights.map(h => ({ ...h, start: h.start, end: h.end })));
-        const marks = syntaxMarks(filteredHighlights);
+        const syntaxes = syntaxMarks(filteredHighlights);
+        const styles = new Array(displaySource.length).fill('');
+        for (const m of syntaxes) {
+            for (let i = Math.max(0, m.start); i < Math.min(displaySource.length, m.end); i++) {
+                styles[i] = m.style;
+            }
+        }
+        const filteredUnderlines = translate(underlines);
+        for (const u of filteredUnderlines) {
+            if (!u.style) continue;
+            for (let i = Math.max(0, u.start); i < Math.min(displaySource.length, u.end); i++) {
+                styles[i] = styles[i] ? styles[i] + ';' + u.style : u.style;
+            }
+        }
+        let html = '', start = 0, cur = styles[0] || '';
+        for (let i = 1; i <= displaySource.length; i++) {
+            if ((styles[i] || '') !== cur || i === displaySource.length) {
+                const chunk = esc(displaySource.slice(start, i));
+                html += cur ? `<span style="${cur}">${chunk}</span>` : chunk;
+                start = i;
+                cur = styles[i] || '';
+            }
+        }
         if (editable) {
             const pos = saveCaret(main);
-            main.innerHTML = markup(displaySource, marks);
+            main.innerHTML = html;
             restoreCaret(main, pos);
         } else {
-            main.innerHTML = markup(displaySource, marks);
+            main.innerHTML = html;
         }
     }
 
@@ -144,6 +169,7 @@ export function createView(opts) {
         offset: () => offset,
 
         setHighlights(hs) { highlights = hs ?? []; repaintMain(); },
+        setUnderlines(us) { underlines = us ?? []; repaintMain(); },
 
         paintLayer(name, marks) {
             if (!layers[name]) return;
